@@ -59,7 +59,7 @@ def estimate_skew(bw):
 
 def deskew(img):
     ang = estimate_skew(binarize(img))
-    if abs(ang) < 0.05:
+    if abs(ang) < 0.45:
         return img, 0.0
     return rotate_img(img, ang), ang
 
@@ -88,14 +88,24 @@ def ocr(img, bw=None):
 def text_right_of(box, words):
     """Chữ cùng dòng, bên phải ô."""
     cy = box["y"] + box["h"] / 2
+    right = box["x"] + box["w"]
     sel = [w for w in words if abs(w["y"] + w["h"] / 2 - cy) < 0.8 * box["h"]
-           and w["x"] >= box["x"] + box["w"] - 4]
+           and w["x"] + w["w"] / 2 > right + 0.5 * box["w"] and w["x"] + w["w"] > right]
     sel.sort(key=lambda w: w["x"])
     out, last = [], None
     for w in sel:
         if last is not None and w["x"] - last > 3 * box["h"]:
             break
-        out.append(w["text"])
+        txt = w["text"]
+        if w["x"] < right - 4:
+            # OCR gộp ô + dấu tick vào từ đầu nhãn ("WVery", "WAll"): bỏ các ký tự đè lên ô, nhưng chỉ cắt
+            # tới chữ in hoa gần nhất (nhãn luôn bắt đầu bằng chữ hoa) để không cắt nhầm "Very" -> "ery"
+            n = max(1, int(round(len(txt) * (right - w["x"]) / w["w"])))
+            ups = [i for i in range(min(n, len(txt) - 1) + 1) if txt[i].isupper()]
+            if ups:
+                txt = txt[ups[-1]:]
+        if txt:
+            out.append(txt)
         last = w["x"] + w["w"]
     return " ".join(out)
 
@@ -126,16 +136,20 @@ def center_ink(bw, x0, y0, x1, y1, ratio=0.5):
 TM_MARGIN = 4        # viền thêm quanh ô khi cắt mẫu
 TM_LOW = 0.55        # ngưỡng thấp hơn, chỉ chấp nhận nếu khung ô còn thấy rõ (ô bị nét vẽ che bớt viền)
 TM_THRESHOLD = 0.75  # độ giống viền ô tối thiểu để coi là ô vuông (ô thật >= 0.85, chữ cái <= 0.61)
+IN_WORD_SHIFT = 0.6  # ô lệch vào trong từ OCR >= 0.6 * chiều rộng ô mới bị coi là chữ cái (cũ: 0.3 -> sót ô có tick)
+NEIGHBOR_GAP = 3.0   # 2 ô cùng dòng cách nhau < 3 * rộng ô -> ô bên phải là chữ cái đầu nhãn (ô bảng cách ~270px)
+WORD_MAX_H = 1.5    # "từ" OCR cao hơn 1.5 * trung vị chiều cao từ là cụm dấu vẽ tay (66-82px vs chữ ~40px)
 
 
 def ink_fill(bw, x, y, w, h):
     """Mật độ mực trong lòng ô (bỏ phần viền), để bắt cả dấu khoanh tròn/tick sát viền."""
-    m = max(4, int(round(0.17 * w)))
+    m = max(5, int(round(0.24 * min(w, h))))
     inner = bw[y + m: y + h - m, x + m: x + w - m]
     return float(inner.mean()) / 255.0 if inner.size else 0.0
 
 
 HALO_DELTA = 0.01    # mực ở vùng quanh ô (trái/trên/dưới) cao hơn ô khác bấy nhiêu -> dấu tràn/khoanh ngoài ô
+HALO_ONLY = 0.06     # vành quanh ô nhiều mực dù ruột trống -> khoanh tròn to bao ngoài ô (Data1.1: ô trống halo <= 0.005)
 
 
 def halo_fill(bw, b):
@@ -162,21 +176,24 @@ def _make_template(crops, w, h):
     return {"img": tpl, "mask": ring, "w": w, "h": h, "n": len(stack)}
 
 
-def build_template(bws):
+def build_template(bws, words_list=None):
     """Học hình ô trống từ các ô sạch (nhận ra bằng hình dạng) của toàn bộ tài liệu.
 
     Một tài liệu có thể dùng nhiều kiểu ký tự ô (to/nhỏ, viền dày/mảnh) nên học một mẫu cho mỗi nhóm kích thước.
     Trả về danh sách mẫu (rỗng nếu chưa đủ ô để học).
     """
     items = []
-    for bw in bws:
-        for (x, y, w, h, _) in find_checkboxes(bw):
+    for i, bw in enumerate(bws):
+        w_list = words_list[i] if words_list and i < len(words_list) else None
+        for (x, y, w, h, _) in find_checkboxes(bw, words=w_list):
             dens = float((bw[y:y + h, x:x + w] > 0).mean())   # nét viền dày -> mật độ mực cao
             items.append((w, h, bw, x, y, dens))
+    if not items:
+        return []
     items.sort(key=lambda t: t[0])
     by_size, cur = [], []
-    for it in items:   # nhóm các ô có chiều rộng chênh nhau không quá ~12%
-        if cur and it[0] > cur[0][0] * 1.12:
+    for it in items:   # nhóm các ô có chiều rộng chênh nhau không quá ~15%
+        if cur and it[0] > cur[0][0] * 1.15:
             by_size.append(cur)
             cur = []
         cur.append(it)
@@ -230,12 +247,12 @@ def _ring_ink(bw, x, y, w, h, gap=3, thick=5):
 
 def frame_ok(bw, x, y, w, h, need_sides=3, need_corners=3):
     """Giống khung ô thật: cạnh thẳng, góc vuông có mực, quanh ô trống (loại chữ D, O, cụm chữ...)."""
-    if not sides_present(bw, x, y, w, h, need=need_sides, frac=0.9):
+    if not sides_present(bw, x, y, w, h, need=need_sides, frac=0.8):
         return False
     H, W = bw.shape
     pts = [(x, y), (x + w - 4, y), (x, y + h - 4), (x + w - 4, y + h - 4)]
     ok = sum(float((bw[max(0, py):py + 4, max(0, px):px + 4] > 0).mean()) > 0.3 for px, py in pts)
-    return ok >= need_corners and _ring_ink(bw, x, y, w, h) <= 0.03
+    return ok >= need_corners and _ring_ink(bw, x, y, w, h) <= 0.08
 
 
 def find_boxes_by_lines(bw, w, h):
@@ -248,22 +265,25 @@ def find_boxes_by_lines(bw, w, h):
     for i in range(1, n):
         x, y, cw, ch, _ = stats[i]
         x, y, cw, ch = x + 1, y + 1, cw - 2, ch - 2   # bỏ phần nở của dilate
-        if not (abs(cw - w) <= 0.08 * w and abs(ch - h) <= 0.08 * h):
+        if not (abs(cw - w) <= 0.12 * w and abs(ch - h) <= 0.12 * h):
             continue
-        if not frame_ok(bw, x, y, cw, ch, need_sides=4, need_corners=4):
+        if not frame_ok(bw, x, y, cw, ch, need_sides=3, need_corners=3):
             continue
         out.append((x, y, cw, ch))
     return out
 
 
-def find_boxes_by_template(bw, tpls):
+def find_boxes_by_template(bw, tpls, words=None):
     """Tìm ô vuông bằng khớp mẫu: vẫn nhận ra ô khi có nét tick/gạch chéo đè lên viền."""
     cand = []
+    H, W = bw.shape
     bwf = bw.astype(np.float32)
-    shape_boxes = find_checkboxes(bw)
+    res_maps = []
     for ti, tpl in enumerate(tpls):
         res = 1.0 - cv2.matchTemplate(bwf, tpl["img"], cv2.TM_SQDIFF_NORMED, mask=tpl["mask"])
-        ys, xs = np.where(res >= TM_LOW)
+        res = np.nan_to_num(res, nan=0.0)
+        res_maps.append(res)
+        ys, xs = np.where(res >= 0.60)
         for px, py in zip(xs, ys):
             cand.append((float(res[py, px]), int(px) + TM_MARGIN + tpl["w"] / 2,
                          int(py) + TM_MARGIN + tpl["h"] / 2, ti))
@@ -271,37 +291,120 @@ def find_boxes_by_template(bw, tpls):
     kept = []
     for score, cx, cy, ti in cand:  # giữ điểm khớp tốt nhất trong mỗi vùng (non-maximum suppression)
         t = tpls[ti]
-        if score < TM_THRESHOLD and not frame_ok(
-                bw, int(round(cx - t["w"] / 2)), int(round(cy - t["h"] / 2)), t["w"], t["h"]):
+        bx = int(round(cx - t["w"] / 2))
+        by = int(round(cy - t["h"] / 2))
+        if bx < 0.06 * W or bx > 0.88 * W or by < 0.04 * H or by > 0.93 * H:
             continue
-        d = 0.7 * tpls[ti]["w"]
+        # Bỏ qua nếu là chữ cái nằm sâu bên trong một từ OCR (loại bỏ chữ cái in hoa trong tiêu đề/đoạn văn).
+        # Ô có dấu tick tràn thường bị OCR gộp vào từ đầu nhãn ("WVery", "cf") và lệch vào trong từ ~7px,
+        # nên chỉ loại khi mép trái ô nằm sau đầu từ >= IN_WORD_SHIFT * chiều rộng ô (chữ cái thật lệch >= 1 ký tự).
+        if words and _inside_word(words, cx, cy, t["w"]):
+            continue
+        d = 0.7 * t["w"]
         if all((cx - kx) ** 2 + (cy - ky) ** 2 >= min(d, 0.7 * tpls[kt]["w"]) ** 2
                for _, kx, ky, kt in kept):
             kept.append((score, cx, cy, ti))
-    boxes = []
+
+    # Lọc tính thẳng hàng của cột ô checkbox: loại bỏ các điểm nhiễu ngẫu nhiên
+    final_kept = []
     for score, cx, cy, ti in kept:
+        bx = int(round(cx - tpls[ti]["w"] / 2))
+        aligned = sum(abs(int(round(other_cx - tpls[kt]["w"] / 2)) - bx) <= 25 for _, other_cx, _, kt in kept)
+        if aligned >= 2 or score >= 0.80:
+            final_kept.append((score, cx, cy, ti))
+
+    boxes = []
+    for score, cx, cy, ti in final_kept:
         t = tpls[ti]
         x, y = int(round(cx - t["w"] / 2)), int(round(cy - t["h"] / 2))
         boxes.append({"x": x, "y": y, "w": t["w"], "h": t["h"], "tpl": ti,
                       "fill": ink_fill(bw, x, y, t["w"], t["h"]), "match": round(score, 2)})
-    # ô mà khớp mẫu bỏ sót vẫn được giữ lại: ô sạch nhận ra bằng hình dạng, ô bị nét vẽ che viền nhận ra bằng 4 cạnh
-    extra = [(int(x), int(y), int(w), int(h)) for (x, y, w, h, _) in shape_boxes]
-    for t in (tpls if len(boxes) >= 2 else []):   # trang gần như không có ô thì không tìm thêm
-        extra += [(int(a), int(b_), int(c), int(d)) for a, b_, c, d in find_boxes_by_lines(bw, t["w"], t["h"])]
-    for (x, y, w, h) in extra:
-        if not any(abs(b["x"] - x) < 0.5 * w and abs(b["y"] - y) < 0.5 * h for b in boxes):
-            boxes.append({"x": x, "y": y, "w": w, "h": h, "tpl": -1,
-                          "fill": ink_fill(bw, x, y, w, h), "match": 0.0})
+    # chữ cái đầu nhãn ("G" của "Generally") ngay sau ô nhỏ cũng giống ô -> cùng dòng, sát nhau thì giữ ô bên trái
+    boxes = [b for b in boxes if not any(
+        o is not b and abs(o["y"] - b["y"]) < 0.5 * b["h"] and 0 < b["x"] - o["x"] < NEIGHBOR_GAP * max(o["w"], b["w"])
+        for o in boxes)]
+    boxes += _rescue_in_columns(bw, tpls, res_maps, boxes, words)
+    for b in boxes:   # số ô cùng cột (kể cả chính nó): ô lạc ngoài cột không được dùng luật halo-only
+        b["column"] = sum(abs(o["x"] - b["x"]) <= 25 for o in boxes)
+
     boxes.sort(key=lambda b: (b["y"], b["x"]))
     return boxes
 
 
+def _inside_word(words, cx, cy, bw_):
+    """Tâm ô (cx, cy) nằm sâu trong một từ OCR dài -> là chữ cái, không phải ô.
+
+    Bỏ qua "từ" do chính dấu vẽ tay tạo ra: OCR hay đọc ô + dấu tràn thành 'Wal', 'xi', '©Has'... cao gấp
+    rưỡi dòng chữ bình thường (> WORD_MAX_H * trung vị chiều cao từ trên trang) hoặc kết thúc ngay sau mép phải ô.
+    """
+    max_h = WORD_MAX_H * float(np.median([w["h"] for w in words]))
+    for mw in words:
+        if mw["h"] > max_h or mw["x"] + mw["w"] < cx + bw_:
+            continue
+        if len(mw.get("text", "").strip()) >= 2 and mw["w"] > bw_ * 1.3:
+            if (mw["x"] + bw_ * (0.5 + IN_WORD_SHIFT) <= cx <= mw["x"] + mw["w"] - 3
+                    and mw["y"] - 3 <= cy <= mw["y"] + mw["h"] + 3):
+                return True
+    return False
+
+
+TM_RESCUE = 0.40     # ngưỡng khớp thấp cho ô nằm đúng cột ô đã biết nhưng bị dấu to/tràn đè viền (đo được 0.44-0.65)
+RESCUE_FILL = 0.12   # ô cứu thêm phải có dấu rõ (ruột nhiều mực hoặc halo cao) -> ô trống thật luôn đã qua ngưỡng 0.60
+
+
+def _rescue_in_columns(bw, tpls, res_maps, boxes, words):
+    """Cứu ô bị dấu to che viền: chỉ dò dọc theo các cột đã có >= 3 ô, chấp nhận điểm khớp >= TM_RESCUE
+    nếu ô có mực (đã đánh dấu), có chữ nhãn bên phải và không nằm trong từ OCR."""
+    if len(boxes) < 3:
+        return []
+    H, W = bw.shape
+    cols, cur = [], []
+    for b in sorted(boxes, key=lambda b: b["x"]):   # gom cột theo x (cho phép lệch 25px do nghiêng còn sót)
+        if cur and b["x"] - cur[-1]["x"] > 25:
+            cols.append(cur)
+            cur = []
+        cur.append(b)
+    cols.append(cur)
+    base = float(np.median([b["fill"] for b in boxes]))
+    found = []
+    for col, ti in ((c, ti) for c in cols if len(c) >= 3 for ti in range(len(tpls))):
+        # thử mọi mẫu: một cột có thể trộn ô to/nhỏ (--mixed)
+        t, res = tpls[ti], res_maps[ti]
+        x0 = max(0, min(b["x"] for b in col) - 8 - TM_MARGIN)
+        x1 = min(res.shape[1], max(b["x"] for b in col) + 9 - TM_MARGIN)
+        if x1 <= x0:
+            continue
+        strip = res[:, x0:x1]
+        best_x = strip.argmax(axis=1)
+        best = strip.max(axis=1)
+        for py in np.argsort(-best):
+            if best[py] < TM_RESCUE:
+                break
+            x, y = int(x0 + best_x[py] + TM_MARGIN), int(py + TM_MARGIN)
+            if y < 0.04 * H or y > 0.93 * H:
+                continue
+            if any(abs(o["y"] - y) < 0.8 * o["h"] and abs(o["x"] - x) < o["w"] for o in boxes + found):
+                continue
+            cx, cy = x + t["w"] / 2, y + t["h"] / 2
+            if words and _inside_word(words, cx, cy, t["w"]):
+                continue
+            fill = ink_fill(bw, x, y, t["w"], t["h"])
+            b = {"x": x, "y": y, "w": t["w"], "h": t["h"], "tpl": ti, "fill": fill,
+                 "match": round(float(best[py]), 2), "rescued": True}
+            if fill <= base + RESCUE_FILL and halo_fill(bw, b) <= HALO_ONLY:
+                continue
+            if words is not None and not text_right_of(b, words):
+                continue
+            found.append(b)
+    return found
+
+
 def scan_boxes(bw, words, tpls):
     if tpls:
-        boxes = find_boxes_by_template(bw, tpls)
+        boxes = find_boxes_by_template(bw, tpls, words=words)
     else:
         boxes = [{"x": x, "y": y, "w": w, "h": h, "fill": f, "tpl": 0}
-                 for (x, y, w, h, f) in find_checkboxes(bw)]
+                 for (x, y, w, h, f) in find_checkboxes(bw, words=words)]
     if not boxes:
         return boxes, 0.0
     for b in boxes:
@@ -310,9 +413,11 @@ def scan_boxes(bw, words, tpls):
     allh = float(np.median([b["halo"] for b in boxes]))
     for b in boxes:   # mức "ô trống" tính riêng cho từng kiểu ô (ô nhỏ/mảnh có mực khác ô to)
         grp = [o for o in boxes if o["tpl"] == b["tpl"]]
-        base = float(np.median([o["fill"] for o in grp])) if len(grp) >= 3 else allf
-        hbase = float(np.median([o["halo"] for o in grp])) if len(grp) >= 3 else allh
-        b["marked"] = b["fill"] > base + BOX_DELTA or b["halo"] > hbase + HALO_DELTA
+        # nhóm nhỏ (3-4 ô) mà đa số đã tick thì trung vị nhóm là mức "có dấu" -> chặn trên bằng trung vị cả trang
+        base = min(float(np.median([o["fill"] for o in grp])), allf) if len(grp) >= 3 else allf
+        hbase = min(float(np.median([o["halo"] for o in grp])), allh) if len(grp) >= 3 else allh
+        b["marked"] = (b["fill"] > base + 0.12 or (b["halo"] > hbase + 0.035 and b["fill"] > base + 0.05)
+                       or (b["halo"] > hbase + HALO_ONLY and b.get("column", 3) >= 3))
         b["text"] = text_right_of(b, words)
     return boxes, allf
 
@@ -326,6 +431,8 @@ def scan_tables(bw, words, n_score):
             continue
         first = ncol - n_score
         header = [text_in(words, cols[c], rows[0], cols[c + 1], rows[1]) for c in range(first, ncol)]
+        if sum(h.strip() == str(i + 1) for i, h in enumerate(header)) > len(header) / 2:
+            header = [str(i + 1) for i in range(len(header))]   # thang số 1..n, sửa ô OCR đọc sai ("e)" thay vì "3")
         data = []
         for r in range(1, len(rows) - 1):
             inks = [center_ink(bw, cols[c], rows[r], cols[c + 1], rows[r + 1])
@@ -333,7 +440,9 @@ def scan_tables(bw, words, n_score):
             base = float(np.median(inks))
             marked = [i for i, v in enumerate(inks) if v - base > CELL_DELTA]
             data.append({"row": r,
-                         "label": text_in(words, cols[0], rows[r], cols[first], rows[r + 1]),
+                         # đọc từng cột nhãn riêng (cột STT "8." + cột nội dung 2 dòng) rồi ghép lại
+                         "label": " ".join(s for s in (text_in(words, cols[c], rows[r], cols[c + 1], rows[r + 1])
+                                                       for c in range(first)) if s),
                          "inks": [round(v, 3) for v in inks], "marked_cols": marked,
                          "cells": [(cols[c], rows[r], cols[c + 1], rows[r + 1])
                                    for c in range(first, ncol)]})
@@ -341,15 +450,22 @@ def scan_tables(bw, words, n_score):
     return out
 
 
-def learn_template(images):
-    return build_template([binarize(im) for im in images])
+def learn_template(images, words_list=None):
+    return build_template([binarize(im) for im in images], words_list=words_list)
 
 
-def scan_page(img, n_score, tpl=None):
-    bw = binarize(img)
-    text, words = ocr(img, bw)
+def scan_page(img, n_score, tpl=None, bw=None, text=None, words=None):
+    if bw is None:
+        bw = binarize(img)
+    if text is None or words is None:
+        text, words = ocr(img, bw)
     boxes, base = scan_boxes(bw, words, tpl)
     tables = scan_tables(bw, words, n_score)
+    # ô vuông nằm trong bảng điểm đã được tính ở phần TABLE -> bỏ khỏi danh sách CHECKBOX để không báo trùng
+    def in_table(b):
+        cx, cy = b["x"] + b["w"] / 2, b["y"] + b["h"] / 2
+        return any(tx <= cx <= tx + tw and ty <= cy <= ty + th for tx, ty, tw, th in (t["bbox"] for t in tables))
+    boxes = [b for b in boxes if not in_table(b)]
     return {"text": text, "words": words, "boxes": boxes, "box_base": base, "tables": tables}
 
 
@@ -392,8 +508,9 @@ def main():
 
     if args.simulate and args.mixed:
         mrng = random.Random(args.seed + 100)
-        for img in images:
-            for (x, y, w, h, _) in find_checkboxes(binarize(img)):
+        for img in images:   # truyền từ OCR để không vẽ lại chữ "O" thành ô vuông
+            bw0 = binarize(img)
+            for (x, y, w, h, _) in find_checkboxes(bw0, words=ocr(img, bw0)[1]):
                 r = mrng.random()
                 if r < 0.5:
                     cv2.rectangle(img, (x - 3, y - 3), (x + w + 3, y + h + 3), (255, 255, 255), -1)
@@ -402,9 +519,10 @@ def main():
                     cv2.rectangle(img, (x0, y0), (x0 + n, y0 + n), (0, 0, 0), 2 if r < 0.25 else 1)
 
     if args.simulate:
-        tpl0 = learn_template(images)
-        for pno, img in enumerate(images, 1):
-            page = scan_page(img, args.score_cols, tpl0)
+        sim_words_list = [ocr(im, binarize(im))[1] for im in images]
+        tpl0 = learn_template(images, words_list=sim_words_list)
+        for pno, (img, w_list) in enumerate(zip(images, sim_words_list), 1):
+            page = scan_page(img, args.score_cols, tpl0, words=w_list)
             for bi, b in enumerate(page["boxes"]):
                 if rng.random() < 0.3:
                     k = 1.7 if rng.random() < args.overshoot else 0.5   # 1.7 -> nét vẽ tràn ra ngoài ô
@@ -431,12 +549,20 @@ def main():
     if any(skews):
         print("Góc nghiêng đã chỉnh (độ):", [round(a, 2) for a in skews])
 
+    # Chạy OCR một lần cho từng trang để lấy danh sách từ hỗ trợ loại bỏ false positive khi học template
+    pages_ocr = []
+    for im in images:
+        bw = binarize(im)
+        txt, words = ocr(im, bw)
+        pages_ocr.append((bw, txt, words))
+
+    words_list = [p[2] for p in pages_ocr]
     results = []
-    tpl = learn_template(images)  # học hình ô trống từ chính tài liệu đang quét
+    tpl = learn_template(images, words_list=words_list)  # học hình ô trống từ chính tài liệu đang quét
     if tpl:
         print("Mẫu ô vuông học được:", ", ".join(f"{t['w']}x{t['h']} px ({t['n']} ô)" for t in tpl))
-    for pno, img in enumerate(images, 1):
-        page = scan_page(img, args.score_cols, tpl)
+    for pno, (img, (bw, text, words)) in enumerate(zip(images, pages_ocr), 1):
+        page = scan_page(img, args.score_cols, tpl, bw=bw, text=text, words=words)
         results.append(page)
         print(f"\n=================== TRANG {pno} ===================")
         print("[TEXT]")

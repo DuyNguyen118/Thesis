@@ -29,37 +29,133 @@ def binarize(img):
     return bw
 
 
-def find_checkboxes(bw, dpi=DPI):
-    """Ô vuông nhỏ: viền chữ nhật rỗng, tỷ lệ ~1:1, kích thước khoảng 2-5 mm."""
-    mm = dpi / 25.4
-    lo, hi = 2.0 * mm, 5.5 * mm
-    contours, hier = cv2.findContours(bw, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
-    boxes = []
+def _corner_angles(approx):
+    """Tính góc tại mỗi đỉnh của polygon; ô vuông có 4 góc gần 90°, chữ tròn thì không."""
+    pts = approx.reshape(-1, 2).astype(float)
+    n = len(pts)
+    angles = []
+    for i in range(n):
+        v1 = pts[(i - 1) % n] - pts[i]
+        v2 = pts[(i + 1) % n] - pts[i]
+        cos = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2) + 1e-9)
+        angles.append(np.degrees(np.arccos(np.clip(cos, -1, 1))))
+    return angles
+
+
+def _is_rectangular(approx, tol=35):
+    """Polygon có ít nhất 4 góc gần 90° (±tol) — loại chữ tròn O, D, C..."""
+    angles = _corner_angles(approx)
+    return sum(abs(a - 90) < tol for a in angles) >= 4
+
+
+def _border_density(bw, x, y, w, h):
+    """Mật độ mực ở viền ô (dải sát 4 cạnh), để xác nhận có khung bao quanh."""
+    b = max(2, int(0.15 * min(w, h)))  # độ dày dải viền
+    top = bw[y:y + b, x:x + w]
+    bot = bw[y + h - b:y + h, x:x + w]
+    left = bw[y:y + h, x:x + b]
+    right = bw[y:y + h, x + w - b:x + w]
+    total = sum(s.size for s in [top, bot, left, right])
+    if total == 0:
+        return 0.0
+    ink = sum(float((s > 0).sum()) for s in [top, bot, left, right])
+    return ink / total
+
+
+def find_checkboxes(bw, dpi=DPI, words=None):
+    """Tìm các ô checkbox sạch (chưa đánh dấu hoặc viền rõ ràng).
+
+    Hỗ trợ cả ô vuông chuẩn (~1:1, M02) và ô chữ nhật Unicode font (~0.6:1, CamScanner).
+    Kích thước chuẩn ở 300 DPI: w trong khoảng 16-55px, h trong khoảng 20-55px.
+    Nếu truyền `words` (danh sách từ từ OCR), tự động lọc bỏ các chữ cái nằm trong từ.
+    """
+    H, W = bw.shape
+    lo, hi = int(1.5 * dpi / 25.4), int(5.5 * dpi / 25.4)
+
+    multi_words = []
+    if words:
+        for w_obj in words:
+            txt = w_obj.get("text", "").strip()
+            if len(txt) >= 2:
+                multi_words.append(w_obj)
+
+    contours, hier = cv2.findContours(bw, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
     if hier is None:
-        return boxes
-    hier = hier[0]
+        return []
+    hier0 = hier[0]
+
+    boxes = []
+    seen = set()
+
     for i, c in enumerate(contours):
-        if hier[i][3] != -1:          # bỏ contour là lỗ, chỉ xét viền ngoài
-            continue
         x, y, w, h = cv2.boundingRect(c)
+
+        # 1. Kích thước (khoảng 1.5 - 5.5 mm)
         if not (lo <= w <= hi and lo <= h <= hi):
             continue
-        if abs(w - h) > 0.15 * max(w, h):
+
+        # 2. Tỉ lệ khung hình: cho phép từ 0.50 (chữ nhật đứng) đến 1.30 (vuông hoặc hơi ngang)
+        ratio = w / h
+        if not (0.50 <= ratio <= 1.30):
             continue
-        # viền ngoài phải là hình chữ nhật thật (4 đỉnh), chữ O/D/A... thì không
-        approx = cv2.approxPolyDP(c, 0.04 * cv2.arcLength(c, True), True)
-        if len(approx) != 4:
+
+        # 3. Bỏ qua vùng lề trang (tiêu đề đầu trang, chân trang CamScanner, viền mép)
+        if x < 0.05 * W or x > 0.88 * W or y < 0.04 * H or y > 0.94 * H:
             continue
-        # phải có lỗ bên trong chiếm gần hết ô (viền mỏng)
-        child = hier[i][2]
-        if child == -1:
+
+        cx, cy = x + w / 2, y + h / 2
+
+        # 4. Loại bỏ các chữ cái nằm bên trong một từ OCR hoàn chỉnh (ví dụ chữ O trong EVALUATION)
+        in_word = False
+        for mw in multi_words:
+            if mw["w"] > w * 1.3:
+                if mw["x"] + 4 <= cx <= mw["x"] + mw["w"] - 4 and mw["y"] - 3 <= cy <= mw["y"] + mw["h"] + 3:
+                    in_word = True
+                    break
+        if in_word:
             continue
-        hole_area = cv2.contourArea(contours[child])
-        if hole_area < 0.55 * (w * h):
+
+        # 5. Kiểm tra ruột rỗng (hollow): ô chưa đánh dấu phải có ruột tương đối rỗng
+        m = max(3, int(0.20 * min(w, h)))
+        inner = bw[y + m : y + h - m, x + m : x + w - m]
+        inner_fill = float((inner > 0).mean()) if inner.size else 1.0
+
+        child = hier0[i][2]
+        has_hole = (child != -1)
+
+        # Cần có lỗ contour con hoặc mật độ mực vùng ruột rất thấp (< 25%)
+        if not (has_hole or inner_fill < 0.22):
             continue
-        inner = bw[y + h // 4: y + 3 * h // 4, x + w // 4: x + 3 * w // 4]
-        fill = float(inner.mean()) / 255.0
-        boxes.append((x, y, w, h, fill))
+        if inner_fill > 0.30:
+            continue
+
+        # 6. Kiểm tra viền: ít nhất 3 cạnh phải có nét mực bao quanh
+        b = max(2, int(0.15 * min(w, h)))
+        top = bw[y : y + b, x : x + w]
+        bot = bw[y + h - b : y + h, x : x + w]
+        left = bw[y : y + h, x : x + b]
+        right = bw[y : y + h, x + w - b : x + w]
+        sides_ink = [
+            float((top > 0).mean()) if top.size else 0,
+            float((bot > 0).mean()) if bot.size else 0,
+            float((left > 0).mean()) if left.size else 0,
+            float((right > 0).mean()) if right.size else 0,
+        ]
+        if sum(s >= 0.25 for s in sides_ink) < 3:
+            continue
+
+        # Tránh trùng lặp
+        duplicate = False
+        for sx, sy in seen:
+            if abs(sx - x) < 0.5 * w and abs(sy - y) < 0.5 * h:
+                duplicate = True
+                break
+        if duplicate:
+            continue
+
+        seen.add((x, y))
+        boxes.append((x, y, w, h, inner_fill))
+
     boxes.sort(key=lambda b: (b[1], b[0]))
     return boxes
 

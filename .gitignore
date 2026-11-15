@@ -1,6 +1,7 @@
-﻿.venv/
+.venv/
 data/
 output/
 __pycache__/
 AGENT.md
 task.md
+models/

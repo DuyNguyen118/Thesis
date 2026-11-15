@@ -29,39 +29,6 @@ def binarize(img):
     return bw
 
 
-def _corner_angles(approx):
-    """Tính góc tại mỗi đỉnh của polygon; ô vuông có 4 góc gần 90°, chữ tròn thì không."""
-    pts = approx.reshape(-1, 2).astype(float)
-    n = len(pts)
-    angles = []
-    for i in range(n):
-        v1 = pts[(i - 1) % n] - pts[i]
-        v2 = pts[(i + 1) % n] - pts[i]
-        cos = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2) + 1e-9)
-        angles.append(np.degrees(np.arccos(np.clip(cos, -1, 1))))
-    return angles
-
-
-def _is_rectangular(approx, tol=35):
-    """Polygon có ít nhất 4 góc gần 90° (±tol) — loại chữ tròn O, D, C..."""
-    angles = _corner_angles(approx)
-    return sum(abs(a - 90) < tol for a in angles) >= 4
-
-
-def _border_density(bw, x, y, w, h):
-    """Mật độ mực ở viền ô (dải sát 4 cạnh), để xác nhận có khung bao quanh."""
-    b = max(2, int(0.15 * min(w, h)))  # độ dày dải viền
-    top = bw[y:y + b, x:x + w]
-    bot = bw[y + h - b:y + h, x:x + w]
-    left = bw[y:y + h, x:x + b]
-    right = bw[y:y + h, x + w - b:x + w]
-    total = sum(s.size for s in [top, bot, left, right])
-    if total == 0:
-        return 0.0
-    ink = sum(float((s > 0).sum()) for s in [top, bot, left, right])
-    return ink / total
-
-
 def find_checkboxes(bw, dpi=DPI, words=None):
     """Tìm các ô checkbox sạch (chưa đánh dấu hoặc viền rõ ràng).
 
@@ -162,11 +129,13 @@ def find_checkboxes(bw, dpi=DPI, words=None):
 
 def find_table_lines(bw, dpi=DPI):
     """Tìm đường kẻ ngang/dọc dài bằng morphology."""
-    h, w = bw.shape
-    min_len_h = int(w * 0.08)
-    min_len_v = int(dpi / 25.4 * 8)
-    horiz = cv2.morphologyEx(bw, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (min_len_h, 1)))
-    vert = cv2.morphologyEx(bw, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (1, min_len_v)))
+    mm = dpi / 25.4
+    min_len_h = int(mm * 8)
+    min_len_v = int(mm * 8)
+    bw_h = cv2.morphologyEx(bw, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 1)))
+    bw_v = cv2.morphologyEx(bw, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (1, 5)))
+    horiz = cv2.morphologyEx(bw_h, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (min_len_h, 1)))
+    vert = cv2.morphologyEx(bw_v, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (1, min_len_v)))
     return horiz, vert
 
 

@@ -1,0 +1,390 @@
+{
+  "sim M02 --seed 1": {
+    "ok": 10,
+    "total": 10,
+    "missed": 0,
+    "fp": 0
+  },
+  "sim M02 --seed 7 --overshoot 0.3 --rotate 1.5": {
+    "ok": 16,
+    "total": 16,
+    "missed": 0,
+    "fp": 0
+  },
+  "sim M02 --seed 3 --mixed": {
+    "ok": 14,
+    "total": 14,
+    "missed": 0,
+    "fp": 0
+  },
+  "sim M02 --seed 5 --overshoot 0.5 --rotate -1.0": {
+    "ok": 20,
+    "total": 20,
+    "missed": 0,
+    "fp": 0
+  },
+  "sim M02 --seed 11 --overshoot 0.4 --rotate 2.0 --mixed": {
+    "ok": 15,
+    "total": 16,
+    "missed": 1,
+    "fp": 0
+  },
+  "sim M02 --seed 21 --overshoot 0.5 --rotate -1.8": {
+    "ok": 14,
+    "total": 15,
+    "missed": 1,
+    "fp": 0
+  },
+  "sim M02 --seed 33 --mixed --rotate 0.8": {
+    "ok": 7,
+    "total": 7,
+    "missed": 0,
+    "fp": 0
+  },
+  "sim M02 --seed 44 --overshoot 0.3 --mixed": {
+    "ok": 12,
+    "total": 12,
+    "missed": 0,
+    "fp": 0
+  },
+  "sim M02 --seed 55 --overshoot 0.2 --rotate 1.0 --mixed": {
+    "ok": 15,
+    "total": 15,
+    "missed": 0,
+    "fp": 0
+  },
+  "sim M03 --seed 1": {
+    "ok": 12,
+    "total": 12,
+    "missed": 0,
+    "fp": 0
+  },
+  "sim M03 --seed 7 --overshoot 0.3 --rotate 1.5": {
+    "ok": 12,
+    "total": 12,
+    "missed": 0,
+    "fp": 0
+  },
+  "sim M03 --seed 3 --mixed": {
+    "ok": 12,
+    "total": 12,
+    "missed": 0,
+    "fp": 0
+  },
+  "sim M03 --seed 5 --overshoot 0.5 --rotate -1.0": {
+    "ok": 12,
+    "total": 12,
+    "missed": 0,
+    "fp": 0
+  },
+  "sim M03 --seed 11 --overshoot 0.4 --rotate 2.0 --mixed": {
+    "ok": 12,
+    "total": 12,
+    "missed": 0,
+    "fp": 0
+  },
+  "sim M03 --seed 21 --overshoot 0.5 --rotate -1.8": {
+    "ok": 12,
+    "total": 12,
+    "missed": 0,
+    "fp": 0
+  },
+  "sim M03 --seed 33 --mixed --rotate 0.8": {
+    "ok": 12,
+    "total": 12,
+    "missed": 0,
+    "fp": 0
+  },
+  "sim M03 --seed 44 --overshoot 0.3 --mixed": {
+    "ok": 12,
+    "total": 12,
+    "missed": 0,
+    "fp": 0
+  },
+  "sim M03 --seed 55 --overshoot 0.2 --rotate 1.0 --mixed": {
+    "ok": 12,
+    "total": 12,
+    "missed": 0,
+    "fp": 0
+  },
+  "real Data1.1": {
+    "err": 0,
+    "label": 99.4,
+    "missed": 0,
+    "extra": 0,
+    "fn": 0,
+    "fp": 0,
+    "rows_ok": 2,
+    "rows": 2
+  },
+  "real Data1.2": {
+    "err": 0,
+    "label": null,
+    "missed": 0,
+    "extra": 0,
+    "fn": 0,
+    "fp": 0,
+    "rows_ok": 12,
+    "rows": 12
+  },
+  "real M02_Intern-evaluation-template": {
+    "err": 0,
+    "label": 100.0,
+    "missed": 0,
+    "extra": 0,
+    "fn": 0,
+    "fp": 0,
+    "rows_ok": 2,
+    "rows": 2
+  },
+  "real M03_LABOUR-MARKET-FEEDBACK": {
+    "err": 0,
+    "label": null,
+    "missed": 0,
+    "extra": 0,
+    "fn": 0,
+    "fp": 0,
+    "rows_ok": 12,
+    "rows": 12
+  },
+  "real Data2.1": {
+    "err": 0,
+    "label": 99.9,
+    "missed": 0,
+    "extra": 0,
+    "fn": 0,
+    "fp": 0,
+    "rows_ok": 2,
+    "rows": 2
+  },
+  "real Data2.2": {
+    "err": 0,
+    "label": null,
+    "missed": 0,
+    "extra": 0,
+    "fn": 0,
+    "fp": 0,
+    "rows_ok": 12,
+    "rows": 12
+  },
+  "real Data3.1": {
+    "err": 0,
+    "label": 99.7,
+    "missed": 0,
+    "extra": 0,
+    "fn": 0,
+    "fp": 0,
+    "rows_ok": 2,
+    "rows": 2
+  },
+  "real Data3.2": {
+    "err": 0,
+    "label": 100.0,
+    "missed": 0,
+    "extra": 0,
+    "fn": 0,
+    "fp": 0,
+    "rows_ok": 12,
+    "rows": 12
+  },
+  "real Data10.1": {
+    "err": 6,
+    "label": 97.4,
+    "missed": 3,
+    "extra": 1,
+    "fn": 2,
+    "fp": 0,
+    "rows_ok": 2,
+    "rows": 2
+  },
+  "real Data10.2": {
+    "err": 0,
+    "label": null,
+    "missed": 0,
+    "extra": 0,
+    "fn": 0,
+    "fp": 0,
+    "rows_ok": 12,
+    "rows": 12
+  },
+  "real Data11.1": {
+    "err": 2,
+    "label": 100.0,
+    "missed": 0,
+    "extra": 1,
+    "fn": 0,
+    "fp": 1,
+    "rows_ok": 2,
+    "rows": 2
+  },
+  "real Data11.2": {
+    "err": 0,
+    "label": null,
+    "missed": 0,
+    "extra": 0,
+    "fn": 0,
+    "fp": 0,
+    "rows_ok": 12,
+    "rows": 12
+  },
+  "real Data12.1": {
+    "err": 4,
+    "label": 98.1,
+    "missed": 0,
+    "extra": 2,
+    "fn": 0,
+    "fp": 2,
+    "rows_ok": 2,
+    "rows": 2
+  },
+  "real Data12.2": {
+    "err": 0,
+    "label": null,
+    "missed": 0,
+    "extra": 0,
+    "fn": 0,
+    "fp": 0,
+    "rows_ok": 12,
+    "rows": 12
+  },
+  "real Data13.1": {
+    "err": 3,
+    "label": 98.1,
+    "missed": 2,
+    "extra": 0,
+    "fn": 1,
+    "fp": 0,
+    "rows_ok": 2,
+    "rows": 2
+  },
+  "real Data13.2": {
+    "err": 1,
+    "label": null,
+    "missed": 1,
+    "extra": 0,
+    "fn": 0,
+    "fp": 0,
+    "rows_ok": 12,
+    "rows": 12
+  },
+  "real Data4.1": {
+    "err": 1,
+    "label": 100.0,
+    "missed": 1,
+    "extra": 0,
+    "fn": 0,
+    "fp": 0,
+    "rows_ok": 2,
+    "rows": 2
+  },
+  "real Data4.2": {
+    "err": 1,
+    "label": null,
+    "missed": 0,
+    "extra": 1,
+    "fn": 0,
+    "fp": 0,
+    "rows_ok": 12,
+    "rows": 12
+  },
+  "real Data5.1": {
+    "err": 4,
+    "label": 98.8,
+    "missed": 3,
+    "extra": 0,
+    "fn": 1,
+    "fp": 0,
+    "rows_ok": 2,
+    "rows": 2
+  },
+  "real Data5.2": {
+    "err": 0,
+    "label": null,
+    "missed": 0,
+    "extra": 0,
+    "fn": 0,
+    "fp": 0,
+    "rows_ok": 12,
+    "rows": 12
+  },
+  "real Data6.1": {
+    "err": 7,
+    "label": 99.5,
+    "missed": 3,
+    "extra": 1,
+    "fn": 2,
+    "fp": 1,
+    "rows_ok": 2,
+    "rows": 2
+  },
+  "real Data6.2": {
+    "err": 1,
+    "label": null,
+    "missed": 0,
+    "extra": 0,
+    "fn": 0,
+    "fp": 0,
+    "rows_ok": 12,
+    "rows": 13
+  },
+  "real Data7.1": {
+    "err": 1,
+    "label": 100.0,
+    "missed": 1,
+    "extra": 0,
+    "fn": 0,
+    "fp": 0,
+    "rows_ok": 2,
+    "rows": 2
+  },
+  "real Data7.2": {
+    "err": 2,
+    "label": null,
+    "missed": 1,
+    "extra": 1,
+    "fn": 0,
+    "fp": 0,
+    "rows_ok": 12,
+    "rows": 12
+  },
+  "real Data8.1": {
+    "err": 0,
+    "label": 99.9,
+    "missed": 0,
+    "extra": 0,
+    "fn": 0,
+    "fp": 0,
+    "rows_ok": 2,
+    "rows": 2
+  },
+  "real Data8.2": {
+    "err": 2,
+    "label": null,
+    "missed": 0,
+    "extra": 2,
+    "fn": 0,
+    "fp": 0,
+    "rows_ok": 12,
+    "rows": 12
+  },
+  "real Data9.1": {
+    "err": 9,
+    "label": 100.0,
+    "missed": 6,
+    "extra": 0,
+    "fn": 3,
+    "fp": 0,
+    "rows_ok": 2,
+    "rows": 2
+  },
+  "real Data9.2": {
+    "err": 0,
+    "label": null,
+    "missed": 0,
+    "extra": 0,
+    "fn": 0,
+    "fp": 0,
+    "rows_ok": 12,
+    "rows": 12
+  }
+}

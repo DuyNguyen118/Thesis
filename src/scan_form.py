@@ -18,7 +18,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 import pytesseract
-from common import TRUTH
+from common import MODELS, TRUTH
 
 from detect_layout import binarize, find_checkboxes, find_table_lines, render_pages
 from detect_tables import draw_mark, find_tables
@@ -283,21 +283,24 @@ SOFT_SHARPNESS = 200  # phương sai Laplacian dưới mức này là trang mờ
 SOFT_INK = 40         # mực in có độ xám trung vị trên mức này là trang nhạt (Data9.1 trang 4: 98; trang đậm 7-35)
 
 
-def page_is_soft(img, bw):
-    """Trang scan mờ hoặc mực nhạt: ô in mảnh chỉ khớp mẫu 0.55-0.60, được dùng ngưỡng TM_LOW.
+def page_quality(img, bw):
+    """Độ nét + độ đậm mực của trang. `soft` = scan mờ hoặc mực nhạt: ô in mảnh chỉ khớp mẫu 0.55-0.60
+    nên được dùng ngưỡng TM_LOW, và trang bị gắn cờ cần người xem lại (máy dễ sót ô/dấu).
 
     Trang rõ giữ ngưỡng TM_FRAME vì ở đó điểm khớp 0.55-0.60 hầu hết là chữ cái đầu tiêu đề (Data1.1, Data3.1).
     """
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     ink = gray[bw > 0]
-    return (cv2.Laplacian(gray, cv2.CV_64F).var() < SOFT_SHARPNESS
-            or (ink.size > 0 and float(np.median(ink)) > SOFT_INK))
+    sharp = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+    ink_gray = float(np.median(ink)) if ink.size else 0.0
+    return {"sharpness": round(sharp, 1), "ink_gray": round(ink_gray, 1),
+            "soft": sharp < SOFT_SHARPNESS or ink_gray > SOFT_INK}
 
 
 def find_boxes_by_template(bw, tpls, words=None, low=TM_FRAME):
     """Tìm ô vuông bằng khớp mẫu: vẫn nhận ra ô khi có nét tick/gạch chéo đè lên viền.
 
-    `low` là điểm khớp tối thiểu: TM_FRAME cho trang rõ, TM_LOW cho trang mờ (page_is_soft)."""
+    `low` là điểm khớp tối thiểu: TM_FRAME cho trang rõ, TM_LOW cho trang mờ (page_quality)."""
     cand = []
     H, W = bw.shape
     bwf = bw.astype(np.float32)
@@ -439,10 +442,12 @@ def _rescue_in_columns(bw, tpls, res_maps, boxes, words):
     return found
 
 
-# OCR hay đọc ô vuông mờ thành các ký tự này (Data2.1 trang 3: ô khớp mẫu 0.57 bị đọc thành "()").
+# OCR hay đọc ô vuông mờ thành các ký tự này (Data2.1 trang 3: ô khớp mẫu 0.57 bị đọc thành "()";
+# Data5.1: ô in kiểu mảnh khớp mẫu 0.05-0.53, đọc thành "LJ", "(1", "OQ").
 # Không có "(|", "C)": đó là ô viền mảnh (--mixed) mà khi đã tick thì vẫn không tìm lại được -> sót dấu trong regress
+# (đã thử lại "C)" sau khi sửa vị trí ô, 2026-11-15: mô phỏng M02 seed 44 vẫn sót thêm 1 dấu)
 CHECKBOX_OCR_GLYPHS = {")", "(", "[]", "()", "[ ]", "CO", "J", "—", "–", "-", "©", "O)", "(C", "DC", "OC",
-                       "o", "O", "0", "u", "U"}
+                       "o", "O", "0", "u", "U", "LJ", "(1", "OQ"}
 
 
 def _rescue_ocr_glyphs(bw, col, known, words):
@@ -462,14 +467,16 @@ def _rescue_ocr_glyphs(bw, col, known, words):
             continue
         if any(abs(o["y"] - w["y"]) < 0.8 * o["h"] for o in known + out):
             continue
-        b = {"x": col_x, "y": w["y"], "w": col_w, "h": col_h, "tpl": col_tpl, "match": 0.50, "rescued": True}
+        # đặt ô đúng chỗ ký tự OCR, không ở x trung vị của cột: cột lệch dần do nghiêng còn sót, đặt ở col_x thì ô
+        # trượt sang phải ~12 px, trùm chữ cái đầu nhãn và bị tính là có dấu (Data5.1 tr.3 "Can learn")
+        b = {"x": w["x"], "y": w["y"], "w": col_w, "h": col_h, "tpl": col_tpl, "match": 0.50, "rescued": True}
         if text_right_of(b, words):
-            b["fill"] = ink_fill(bw, col_x, w["y"], col_w, col_h)
+            b["fill"] = ink_fill(bw, w["x"], w["y"], col_w, col_h)
             out.append(b)
     return out
 
 
-def scan_boxes(bw, words, tpls, low=TM_FRAME):
+def scan_boxes(bw, words, tpls, low=TM_FRAME, gray=None):
     if tpls:
         boxes = find_boxes_by_template(bw, tpls, words=words, low=low)
     else:
@@ -492,7 +499,51 @@ def scan_boxes(bw, words, tpls, low=TM_FRAME):
         b["marked"] = (b["fill"] > base + 0.12 or (b["halo"] > hbase + 0.035 and b["fill"] > base + 0.05)
                        or (b["halo"] > hbase + HALO_ONLY and b.get("column", 3) >= 3))
         b["text"] = text_right_of(b, words)
+    if tpls and gray is not None:
+        cnn_rescue(gray, boxes)
     return boxes, allf
+
+
+# CNN chỉ CỨU ô luật cho là trống (tick nhạt / nét tick nằm ngoài ô), không thay luật: đo chéo 2 fold theo sinh viên
+# trên 742 ô thật, luật sót 6 báo nhầm 9; luật + CNN >= 0.90 sót 1, báo nhầm vẫn 9 khi bỏ trang không có mẫu ô
+# (thay hẳn bằng CNN: báo nhầm 23). Mô hình cuối: mọi ô CNN >= 0.8 đều có dấu thật (0.93-1.00), ô trống đều < 0.8.
+# Chỉ dùng trên trang có mẫu ô học được: trang không có ô (M03) thì "ô" tìm ra là nét chữ ký, CNN dễ tin là có dấu.
+CNN_RESCUE = 0.90
+USE_CNN = True       # tắt bằng --no-cnn; tự tắt khi --crops để cột rule_marked của bộ dữ liệu vẫn là luật thuần
+_marker = None       # mô hình nạp một lần; False nếu thiếu torch hoặc models/marker_cnn.pt
+
+
+def _load_marker():
+    global _marker
+    if _marker is None:
+        try:
+            import torch
+            from train_marker import MarkerCNN
+            m = MarkerCNN()
+            m.load_state_dict(torch.load(MODELS / "marker_cnn.pt", map_location="cpu"))
+            m.eval()
+            _marker = m
+        except Exception as e:   # không có CNN thì chạy luật như cũ
+            print(f"Không dùng CNN ({e.__class__.__name__}): chỉ dùng luật")
+            _marker = False
+    return _marker or None
+
+
+def cnn_rescue(gray, boxes):
+    """Ô luật cho là trống mà CNN chắc chắn có dấu (>= CNN_RESCUE) -> có dấu, ghi cnn_p / cnn_rescued để truy vết."""
+    todo = [b for b in boxes if not b["marked"]]
+    model = _load_marker() if USE_CNN and todo else None
+    if model is None:
+        return
+    import torch
+    from export_crops import crop_box
+    x = np.stack([1.0 - crop_box(gray, b["x"], b["y"], b["w"], b["h"]).astype(np.float32) / 255.0 for b in todo])
+    with torch.no_grad():
+        probs = torch.softmax(model(torch.from_numpy(x)[:, None]), 1)[:, 1].tolist()
+    for b, p in zip(todo, probs):
+        b["cnn_p"] = round(p, 3)
+        if p >= CNN_RESCUE:
+            b["marked"] = b["cnn_rescued"] = True
 
 
 def scan_tables(bw, words, n_score):
@@ -550,15 +601,17 @@ def scan_page(img, n_score, tpl=None, bw=None, text=None, words=None):
         bw = binarize(img)
     if text is None or words is None:
         text, words = ocr(img, bw)
-    soft = page_is_soft(img, bw)
-    boxes, base = scan_boxes(bw, words, tpl, low=TM_LOW if soft else TM_FRAME)
+    quality = page_quality(img, bw)
+    boxes, base = scan_boxes(bw, words, tpl, low=TM_LOW if quality["soft"] else TM_FRAME,
+                             gray=cv2.cvtColor(img, cv2.COLOR_BGR2GRAY))
     tables = scan_tables(bw, words, n_score)
     # ô vuông nằm trong bảng điểm đã được tính ở phần TABLE -> bỏ khỏi danh sách CHECKBOX để không báo trùng
     def in_table(b):
         cx, cy = b["x"] + b["w"] / 2, b["y"] + b["h"] / 2
         return any(tx <= cx <= tx + tw and ty <= cy <= ty + th for tx, ty, tw, th in (t["bbox"] for t in tables))
     boxes = [b for b in boxes if not in_table(b)]
-    return {"text": text, "words": words, "boxes": boxes, "box_base": base, "tables": tables, "soft": soft}
+    return {"text": text, "words": words, "boxes": boxes, "box_base": base, "tables": tables,
+            "quality": quality, "needs_review": quality["soft"]}
 
 
 def annotate(img, page):
@@ -577,6 +630,11 @@ def annotate(img, page):
                 ov = vis.copy()
                 cv2.rectangle(ov, (x0, y0), (x1, y1), (0, 0, 255), -1)
                 vis = cv2.addWeighted(ov, 0.25, vis, 0.75, 0)
+    if page.get("needs_review"):   # trang mờ/nhạt: băng cam trên đầu ảnh để người xem lại
+        q = page["quality"]
+        cv2.rectangle(vis, (0, 0), (vis.shape[1], 90), (0, 140, 255), -1)
+        cv2.putText(vis, f"NEEDS REVIEW - blurry/faint scan (sharpness {q['sharpness']:.0f}, ink {q['ink_gray']:.0f})",
+                    (30, 62), cv2.FONT_HERSHEY_SIMPLEX, 1.6, (255, 255, 255), 4)
     return vis
 
 
@@ -594,8 +652,11 @@ def main():
     ap.add_argument("--light", type=float, default=0.0, help="xác suất dấu mô phỏng vẽ bằng mực nhạt")
     ap.add_argument("--out", default="output", help="thư mục ghi ảnh *_scan.png và *_scan.json")
     ap.add_argument("--crops", help="xuất ảnh cắt quanh ô kèm nhãn vào thư mục này (export_crops.py)")
+    ap.add_argument("--no-cnn", action="store_true", help="chỉ dùng luật, không cho CNN cứu ô (models/marker_cnn.pt)")
     args = ap.parse_args()
     styles = args.styles.split(",")
+    global USE_CNN
+    USE_CNN = not (args.no_cnn or args.crops)
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -669,6 +730,9 @@ def main():
         page = scan_page(img, args.score_cols, tpl, bw=bw, text=text, words=words)
         results.append(page)
         print(f"\n=================== TRANG {pno} ===================")
+        if page["needs_review"]:
+            q = page["quality"]
+            print(f"[CẦN XEM LẠI] scan mờ/nhạt (độ nét {q['sharpness']:.0f}, mực {q['ink_gray']:.0f}): dễ sót ô/dấu")
         print("[TEXT]")
         print(page["text"].strip() or "(không có chữ)")
         print(f"\n[CHECKBOX] {len(page['boxes'])} ô, {sum(b['marked'] for b in page['boxes'])} ô có dấu")
@@ -709,7 +773,7 @@ def main():
         print(f"\nMô phỏng: nhận đúng {ok}/{ok + bad} dấu đã vẽ, báo nhầm {false_pos} ô trống")
 
     with open(out / f"{stem}_scan.json", "w", encoding="utf-8") as f:
-        json.dump([{"text": p["text"], "boxes": p["boxes"],
+        json.dump([{"text": p["text"], "needs_review": p["needs_review"], "quality": p["quality"], "boxes": p["boxes"],
                     "tables": [{**t, "rows": [{k: v for k, v in r.items() if k != "cells"}
                                               for r in t["rows"]]} for t in p["tables"]]}
                    for p in results], f, ensure_ascii=False, indent=2, default=str)

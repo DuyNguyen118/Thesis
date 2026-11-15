@@ -47,13 +47,25 @@ def load_rows(crops):
     return rows
 
 
-def split(rows, seed):
+def real_form(doc):
+    """Data4.1 và Data4.2 là hai mẫu khác nhau của cùng một sinh viên -> chia fold theo số thứ tự (Data4)."""
+    return doc.split(".")[0]
+
+
+def split(rows, seed, fold=None, folds=2):
+    """fold = None: test là mọi file thật (mô hình chỉ học mô phỏng).
+    fold = k: chia file thật thành `folds` phần theo sinh viên, phần k làm test, các phần còn lại được học cùng mô phỏng.
+    fold = -1: học mọi file thật (mô hình dùng thật, sau khi đã đo bằng các fold), không còn tập test."""
     sim_docs = sorted({r["doc"] for r in rows if r["source"] == "sim"})
     random.Random(seed).shuffle(sim_docs)
     val_docs = set(sim_docs[:max(1, int(len(sim_docs) * VAL_FRAC))])
-    train = [r for r in rows if r["source"] == "sim" and r["doc"] not in val_docs]
+    real_forms = sorted({real_form(r["doc"]) for r in rows if r["source"] == "real"})
+    random.Random(seed).shuffle(real_forms)
+    test_forms = set(real_forms) if fold is None else set() if fold < 0 else set(real_forms[fold::folds])
+    train = [r for r in rows if r["doc"] not in val_docs
+             and (r["source"] == "sim" or real_form(r["doc"]) not in test_forms)]
     val = [r for r in rows if r["doc"] in val_docs]
-    test = [r for r in rows if r["source"] == "real"]
+    test = [r for r in rows if r["source"] == "real" and real_form(r["doc"]) in test_forms]
     return train, val, test
 
 
@@ -136,10 +148,13 @@ def main():
     ap.add_argument("--batch", type=int, default=64)
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--fold", type=int, help="học thêm file thật ngoài fold này, test trên fold này (0..folds-1); "
+                                             "-1 = học mọi file thật")
+    ap.add_argument("--folds", type=int, default=2)
     args = ap.parse_args()
 
     torch.manual_seed(args.seed)
-    train, val, test = split(load_rows(args.crops), args.seed)
+    train, val, test = split(load_rows(args.crops), args.seed, args.fold, args.folds)
     for name, rs in (("train", train), ("val", val), ("test", test)):
         print(f"{name:5}: {len(rs):5} ảnh, {sum(r['y_true'] for r in rs):4} có dấu, "
               f"{len({r['doc'] for r in rs})} tài liệu")

@@ -186,14 +186,14 @@ Mọi số liệu trong báo cáo này đều có thể được tái lập hoà
 
 ## 8. CẬP NHẬT 2026-11-15: MỞ RỘNG LÊN 28 TÀI LIỆU, CỜ "CẦN XEM LẠI" VÀ CNN CỨU DẤU
 
-> Các mục 1–7 ở trên giữ nguyên như lúc viết (8 tài liệu). Mục này ghi riêng mọi thay đổi và số liệu của ngày 2026-11-15. Chỗ nào mục cũ không còn đúng được ghi ở mục 8.8 (đính chính), không sửa vào mục cũ.
+> Các mục 1–7 ở trên giữ nguyên như lúc viết (8 tài liệu). Mục này gộp mọi thay đổi và số liệu của ngày 2026-11-15, số liệu là trạng thái cuối ngày. Chỗ nào mục cũ không còn đúng được ghi ở mục 8.8 (đính chính), không sửa vào mục cũ.
 
 ### 8.1. Tập dữ liệu: 28 tài liệu có đáp án
 
 * **28 tài liệu**, tất cả `verified: true` trong `data/truth/`: 13 sinh viên × 2 biểu mẫu (`DataN.1` = M02, `DataN.2` = M03, CamScanner) + 2 biểu mẫu trắng (M02, M03).
 * Quy ước đã chốt: mỗi PDF = 1 sinh viên, 1 loại biểu mẫu; mỗi sinh viên có đúng 2 PDF (M02 + M03); không có biểu mẫu/phiên bản nào khác.
 * Tổng số phần tử trong đáp án: **759 ô checkbox (169 có dấu)** và **197 hàng bảng**.
-* Rà soát đáp án bằng ảnh, đã sửa 5 lỗi ghi nhãn:
+* Rà soát đáp án bằng ảnh, đã sửa 7 lỗi ghi nhãn:
 
 | Tài liệu | Trang | Lỗi trong đáp án | Đã sửa thành |
 | :--- | :---: | :--- | :--- |
@@ -203,28 +203,29 @@ Mọi số liệu trong báo cáo này đều có thể được tái lập hoà
 | Data9.1 | 9 | Thiếu bảng | 1 bảng, cả 2 hàng = Excellent |
 | Data6.1 | 2 | 2 ô trùng tọa độ (494, 1304) | Ô "All objectives…" dời về (493, 1197) |
 | Data13.1 | 5 | Ô "Work usually required review…" có tick nhưng ghi `marked: false` | `marked: true` |
+| Data5.1 | 4 | Tọa độ 3 ô đầu trang lệch 87–129 px theo chiều dọc | (513, 279), (515, 387), (520, 723), lấy theo khung ký tự OCR |
 
 ### 8.2. Các vấn đề kỹ thuật đã giải quyết
 
 **8.2.1. Bảng Attendance/Punctuality không được nhận trên scan lệch hoặc mất viền (Data4.1, 6.1, 9.1)**
 * *Hiện tượng:* cả 3 tài liệu đều `tables: []`; 10 ô của bảng bị báo thành ô checkbox rời với nhãn rác.
 * *Nguyên nhân:* nét kẻ đứt quãng sau scan; ở Data4.1 cột Excellent lệch lên ~10 px; ở Data9.1 bảng mất hẳn đường viền phải.
-* *Giải pháp* (`src/detect_layout.py:163` `find_table_lines`, `src/detect_tables.py:24` `find_tables`): độ dài tối thiểu của nét kẻ tính theo mm (8 mm) thay vì 8% bề rộng trang; đóng hình thái (MORPH_CLOSE 5 px) để nối nét đứt; nở 7×7 khi gom nét thành khối bảng; tự bù cột khi nét ngang kéo dài quá đường dọc cuối (bù theo bề rộng cột trung vị, chỉ khi > 10 mm).
+* *Giải pháp* (`src/detect_layout.py:130` `find_table_lines`, `src/detect_tables.py:22` `find_tables`): độ dài tối thiểu của nét kẻ tính theo mm (8 mm) thay vì 8% bề rộng trang; đóng hình thái (MORPH_CLOSE 5 px) để nối nét đứt; nở 7×7 khi gom nét thành khối bảng; tự bù cột khi nét ngang kéo dài quá đường dọc cuối (bù theo bề rộng cột trung vị, chỉ khi > 10 mm).
 * *Kết quả:* cả 3 tài liệu từ "không thấy bảng" lên **2/2 hàng đúng**.
 
 **8.2.2. Đọc dấu trong ô bảng: một ngưỡng cố định không đủ**
 * *Số đo* (mực vùng giữa ô trừ trung vị của hàng): tick nhạt thật ở Data9.1 chỉ **+0.014 / +0.020**; bóng mờ ở ô trống bên cạnh ở Data6.1 đã **+0.011**; tick trên PDF sạch ở Data2.2 **+0.008** (các ô khác = 0).
 * → Không tồn tại một ngưỡng tuyệt đối tách được cả 3 trường hợp. Ngưỡng 0.007 (mục 4.2) làm Data6.1, 12.1, 13.1 bị đọc 2 cột ở một hàng.
-* *Giải pháp* (`src/scan_form.py:27-31`, `:574`): giữ `CELL_DELTA = 0.03`; nếu không ô nào vượt thì xét ô đậm nhất, nhận nếu (a) cao hơn trung vị > `CELL_FAINT` = 0.012, hoặc hàng "sạch" (ô đậm thứ hai cao hơn trung vị ≤ `CELL_CLEAN` = 0.002) và cao hơn > `CELL_CLEAN_MIN` = 0.005; **và** (b) vượt ô đậm thứ hai ≥ `CELL_LEAD` = 50% khoảng cách tới trung vị.
+* *Giải pháp* (`src/scan_form.py:26-30`, `:535`): giữ `CELL_DELTA = 0.03`; nếu không ô nào vượt thì xét ô đậm nhất, nhận nếu (a) cao hơn trung vị > `CELL_FAINT` = 0.012, hoặc hàng "sạch" (ô đậm thứ hai cao hơn trung vị ≤ `CELL_CLEAN` = 0.002) và cao hơn > `CELL_CLEAN_MIN` = 0.005; **và** (b) vượt ô đậm thứ hai ≥ `CELL_LEAD` = 50% khoảng cách tới trung vị.
 * *Kết quả:* hàng bảng **196/197** (sai duy nhất Data6.2 tr.1 hàng 2, tick quá nhạt).
 
 **8.2.3. Ngưỡng khớp mẫu theo chất lượng trang ("fallback cho ảnh mờ")**
 * *Hiện tượng:* trên trang mờ, ô in mảnh/nhạt chỉ khớp mẫu **0.55–0.59** (dưới ngưỡng 0.60). Hạ ngưỡng xuống 0.55 cho mọi trang thì chữ cái đầu tiêu đề in hoa ("I" của `INITIATIVE`, `INDEPENDENCE` ở Data1.1; tiêu đề ở Data3.1) cũng lọt thành ô.
-* *Giải pháp* (`src/scan_form.py:282-297` `page_quality`): đo từng trang
+* *Giải pháp* (`src/scan_form.py:241-256` `page_quality`): đo từng trang
   * độ nét = phương sai Laplacian của ảnh xám,
   * độ đậm mực = trung vị mức xám của các điểm mực (càng cao càng nhạt).
   * Trang "mờ/nhạt" khi độ nét < `SOFT_SHARPNESS` = 200 **hoặc** mực > `SOFT_INK` = 40. Chỉ trang này dùng ngưỡng `TM_LOW` = 0.55; trang rõ giữ `TM_FRAME` = 0.60.
-  * Điểm khớp < 0.60 còn phải qua 2 kiểm tra (`src/scan_form.py:332`): có ≥ 3/4 cạnh thẳng (mỗi cạnh có mực ≥ 70% chiều dài), và không có từ OCR dài (≥ 3 ký tự) **bắt đầu bên trong ô** (`_starts_word`, `:363`), vì chữ cái đầu tiêu đề luôn nằm ở đầu một từ.
+  * Điểm khớp < 0.60 còn phải qua 2 kiểm tra (`src/scan_form.py:291`): có ≥ 3/4 cạnh thẳng (mỗi cạnh có mực ≥ 70% chiều dài), và không có từ OCR dài (≥ 3 ký tự) **bắt đầu bên trong ô** (`_starts_word`, `:322`), vì chữ cái đầu tiêu đề luôn nằm ở đầu một từ.
 * *Số đo độ nét/độ đậm mực (một số trang):*
 
 | Trang | Độ nét | Mực | Mờ/nhạt? |
@@ -244,17 +245,28 @@ Mọi số liệu trong báo cáo này đều có thể được tái lập hoà
   * `output/<file>_scan.json`: mỗi trang có `"needs_review": true/false` và `"quality": {"sharpness", "ink_gray", "soft"}`;
   * ảnh `output/<file>_p<n>_scan.png`: băng cam "NEEDS REVIEW" kèm 2 chỉ số;
   * màn hình: dòng `[CẦN XEM LẠI]`.
-* Ví dụ Data9.1: trang 3, 4, 6, 7, 10 bị gắn cờ.
+* 21/110 trang bị gắn cờ (ví dụ Data9.1: trang 3, 4, 6, 7, 10).
 * Chưa có cơ sở dữ liệu; khi có, cờ này là một cột `needs_review` của từng trang.
 
-**8.2.5. Cứu ô mà OCR đọc thành ký tự (Data2.1 trang 3)**
-* *Hiện tượng:* ô "Sometimes Interested" khớp mẫu 0.569 và OCR đọc thành `()`.
-* *Giải pháp* (`_rescue_ocr_glyphs`, `src/scan_form.py:451`): trong các cột đã có ≥ 3 ô, một "từ" OCR thuộc tập ký tự dạng ô (`()`, `[]`, `J`, `O`…; `CHECKBOX_OCR_GLYPHS`, `:447`) nằm thẳng cột (lệch ≤ 25 px, cỡ ≤ 55 px) và có nhãn bên phải → thêm ô, **cỡ ô lấy theo các ô cùng cột**.
-* Không dùng `(|`, `C)`: trên mô phỏng `--mixed` đó là ô viền mảnh mà khi đã tick thì không tìm lại được → regress sót thêm 5 dấu.
-* Cột phải có ≥ 3 ô (`:410`): cho phép cột 2 ô thì chữ cái đầu tiêu đề + 1 ô đã thành "cột" (Data1.1).
+**8.2.5. Ô in kiểu khác và ô OCR đọc thành ký tự (Data2.1, Data5.1)**
+* *Hiện tượng:*
+  * Data2.1 tr.3: ô "Sometimes Interested" khớp mẫu 0.569, OCR đọc thành `()`.
+  * Data5.1 tr.3–5: nhiều ô không tìm ra; ô trống "Can learn…" lại bị đánh dấu đỏ.
+* *Nguyên nhân (đo được):*
+  * Các ô sót ở Data5.1 **không phải do mờ**: độ nét quanh ô 1.400–4.600, mực 16–34. Đó là ô in **kiểu khác** (nhỏ, viền mảnh), khớp mẫu chỉ **0.05–0.53**, thấp hơn cả `TM_LOW`; hạ ngưỡng sẽ không bắt được mà còn nhận chữ cái tiêu đề (khớp 0.556–0.597). OCR đọc chúng thành `(1`, `O`, `C)`, `LJ`, `OQ`.
+  * Bản đầu của bước cứu ô từ ký tự đặt ô ở **x trung vị của cột**; cột lệch dần do nghiêng còn sót nên ô trượt phải ~12 px, trùm chữ "C" của "Can" và bị tính là có dấu.
+* *Giải pháp* (`_rescue_ocr_glyphs`, `src/scan_form.py:412`): trong các cột đã có ≥ 3 ô, một "từ" OCR thuộc tập ký tự dạng ô (`CHECKBOX_OCR_GLYPHS`, `:408`), nằm thẳng cột (lệch ≤ 25 px, cỡ ≤ 55 px) và có nhãn bên phải → thêm ô **đúng tọa độ ký tự**, cỡ ô lấy theo các ô cùng cột.
+  * Không dùng `(|`, `C)`: trên mô phỏng `--mixed` đó là ô viền mảnh mà khi đã tick thì không tìm lại được. Đã thử lại `C)` sau khi sửa vị trí ô: mô phỏng M02 seed 44 vẫn sót thêm 1 dấu → giữ loại.
+  * Cột phải có ≥ 3 ô (`:369`): cho phép cột 2 ô thì chữ cái đầu tiêu đề + 1 ô đã thành "cột" (Data1.1).
+* *Kết quả:* Data2.1 54/54 ô; Data5.1 ô 47 → 51/54, báo nhầm 1 → 0; Data10.1 báo nhầm 4 → 0.
 
 **8.2.6. Trang không học được mẫu ô (trang M03 không có checkbox)**
-* Bỏ các "ô" không có chữ nhãn bên phải (`src/scan_form.py:483`): đó là nét chữ ký, con dấu, chữ viết tay (Data2.2 tr.2, Data4.2 tr.2 từ 3 ô thừa còn 1).
+* Bỏ các "ô" không có chữ nhãn bên phải (`src/scan_form.py:446`): đó là nét chữ ký, con dấu, chữ viết tay (Data2.2 tr.2; Data4.2 tr.2 từ 3 ô thừa còn 1).
+
+**8.2.7. Dọn mã nguồn**
+* Bỏ ~190 dòng không được gọi tới: một cách tìm ô bằng 4 cạnh (`find_boxes_by_lines`, `frame_ok`, `_ring_ink`) chưa từng được dùng; công cụ đọc bảng chạy riêng trong `detect_tables.py` (đọc dấu bằng ngưỡng cũ 0.02, khác pipeline thật); các hàm kiểm tra hình dạng (`_is_rectangular`, `_corner_angles`, `_border_density`) và hằng số, import thừa.
+* Cấu trúc sau khi dọn: tìm ô, đọc dấu ô và đọc dấu bảng nằm trong `scan_form.py`; `detect_tables.py` chỉ tách bảng; `detect_layout.py` chỉ chứa các hàm hình học cơ bản (render, nhị phân hóa, tìm ô sạch, tìm đường kẻ).
+* Kiểm chứng: regress 46/46 lượt đạt mốc, mọi chỉ số giống hệt trước khi dọn.
 
 ### 8.3. CNN: đánh giá lại trung thực trên 28 tài liệu
 
@@ -292,78 +304,111 @@ Mọi số liệu trong báo cáo này đều có thể được tái lập hoà
 
 * Loại trang không có mẫu ô (ở đó "ô" là nét chữ ký) → ≥ 0.90: **sót 1, báo nhầm 9** (bằng luật).
 * *Mô hình dùng thật:* học mô phỏng + cả 28 tài liệu (`--fold -1`), lưu `models/marker_cnn.pt`; kết quả 2 fold lưu ở `models/marker_metrics_cv_fold0.json`, `models/marker_metrics_cv_fold1.json`.
-* Kiểm tra mô hình cuối trên output: mọi ô có CNN ≥ 0.8 (6 ô, 0.93–1.00) đều có dấu thật; mọi ô trống đều < 0.8 → chọn **`CNN_RESCUE` = 0.90**.
+* Kiểm tra mô hình cuối trên output: mọi ô có CNN ≥ 0.8 (6 ô, 0.93–1.00) đều có dấu thật; mọi ô trống đều < 0.8 → chọn **`CNN_RESCUE` = 0.90** (`src/scan_form.py:470`, `cnn_rescue` `:491`). Ô bảng vẫn chỉ dùng luật.
 
-### 8.4. Bảng thông số (giá trị tại 2026-11-15)
+### 8.4. Bảng thông số (giá trị cuối ngày 2026-11-15)
 
 | Thông số | Giá trị | Vị trí | Ý nghĩa | Căn cứ / số đo | Giá trị trước |
 | :--- | :---: | :--- | :--- | :--- | :---: |
 | `DPI` | 300 | `detect_layout.py:8` | Độ phân giải render PDF (~11.81 px/mm) | | 300 |
-| `TM_FRAME` | 0.60 | `scan_form.py:143` | Ngưỡng khớp mẫu ô ở trang rõ | Chữ cái tiêu đề khớp tới 0.59–0.61 | 0.60 (ngưỡng cứng) |
-| `TM_LOW` | 0.55 | `scan_form.py:142` | Ngưỡng khớp mẫu ô ở trang mờ/nhạt | Ô in mảnh Data2.1 = 0.569, Data9.1 tr.6–7 = 0.55–0.59 | (không dùng) |
-| Kiểm tra cạnh | ≥ 3/4 cạnh, mỗi cạnh ≥ 70% | `scan_form.py:332` | Điểm khớp < 0.60 phải còn khung ô | | (mới) |
-| `_starts_word` | từ ≥ 3 ký tự, bắt đầu trong nửa trái ô, dài > 1.5 × rộng ô | `scan_form.py:363` | Loại chữ cái đầu tiêu đề | "I" ở x=489, từ "INITIATIVE" bắt đầu x=487 | (mới) |
-| `SOFT_SHARPNESS` | 200 | `scan_form.py:282` | Dưới mức này là trang mờ | Data9.1 tr.4/6/7: 102/157/122; trang rõ 210–1320 | (mới) |
-| `SOFT_INK` | 40 | `scan_form.py:283` | Mực xám trung vị trên mức này là trang nhạt | Data9.1 tr.4: 98; Data6.1 tr.2: 46; trang đậm 7–35 | (mới) |
-| `TM_RESCUE` | 0.40 | `scan_form.py:390` | Cứu ô theo cột khi dấu to đè viền | Đo được 0.44–0.65 | 0.40 |
-| `RESCUE_FILL` | 0.12 | `scan_form.py:391` | Ô cứu theo cột phải có mực rõ | | 0.12 |
-| Số ô tối thiểu của cột | 3 | `scan_form.py:410` | Mới được cứu ô trong cột | Cột 2 ô → chữ đầu tiêu đề thành ô (Data1.1) | 3 |
-| `CHECKBOX_OCR_GLYPHS` | `( ) [] () [ ] CO J — – - © O) (C DC OC o O 0 u U` | `scan_form.py:447` | Ký tự OCR được coi là ô | Data2.1 tr.3: `()` | (mới) |
-| Lệch cột / cỡ ký tự | ≤ 25 px / ≤ 55 px | `scan_form.py:462` | Ký tự phải thẳng cột ô, cỡ bằng ô | | (mới) |
-| `CELL_DELTA` | 0.03 | `scan_form.py:27` | Ô bảng có dấu nếu mực > trung vị hàng + 0.03 | | 0.03 → 0.007 (8/11) → 0.03 |
-| `CELL_FAINT` | 0.012 | `scan_form.py:28` | Ô đậm nhất (khi không ô nào qua CELL_DELTA) | Tick nhạt Data9.1 +0.014; bóng Data6.1 +0.011 | (mới) |
-| `CELL_LEAD` | 0.5 | `scan_form.py:29` | Ô đậm nhất phải vượt ô thứ hai ≥ 50% | | (mới) |
-| `CELL_CLEAN` | 0.002 | `scan_form.py:30` | Hàng "sạch" nếu ô thứ hai ≤ trung vị + 0.002 | Data2.2: các ô khác = 0 | (mới) |
-| `CELL_CLEAN_MIN` | 0.005 | `scan_form.py:31` | Ở hàng sạch, ô đậm nhất chỉ cần > +0.005 | Data2.2 hàng 2: +0.008 | (mới) |
-| Nét kẻ bảng tối thiểu | 8 mm (ngang và dọc) | `detect_layout.py:166` | Độ dài tối thiểu để là đường kẻ | | ngang 8% bề rộng trang |
-| MORPH_CLOSE nét kẻ | 5 px | `detect_layout.py:168` | Nối nét kẻ bị đứt do scan | | (không có) |
-| Nở gom khối bảng | 7×7 | `detect_tables.py:31` | Gom nét ngang/dọc thành một bảng | | 5×5 |
-| Bảng tối thiểu | 30 × 12 mm | `detect_tables.py:36` | Kích thước khối bảng | | 30 × 12 mm |
-| Gộp đường gần | 1.5 mm | `detect_tables.py:41` | Gộp 2 nét kẻ quá sát | | 1.5 mm |
-| Bù cột mất viền | cột trung vị > 10 mm | `detect_tables.py:52` | Thêm cột khi mất viền phải (Data9.1) | | (không có) |
-| `CNN_RESCUE` | 0.90 | `scan_form.py:507` | CNN ≥ mức này thì cứu ô luật cho là trống | Bảng 8.3 | (mới) |
-| `USE_CNN` | True | `scan_form.py:508` | Tắt bằng `--no-cnn`; tự tắt khi `--crops` | | (mới) |
+| `TM_FRAME` | 0.60 | `scan_form.py:142` | Ngưỡng khớp mẫu ô ở trang rõ | Chữ cái tiêu đề khớp tới 0.556–0.597 | 0.60 (ngưỡng cứng) |
+| `TM_LOW` | 0.55 | `scan_form.py:141` | Ngưỡng khớp mẫu ô ở trang mờ/nhạt | Ô in mảnh Data2.1 = 0.569, Data9.1 tr.6–7 = 0.55–0.59 | (không dùng) |
+| Kiểm tra cạnh | ≥ 3/4 cạnh, mỗi cạnh ≥ 70% | `scan_form.py:291` | Điểm khớp < 0.60 phải còn khung ô | | (mới) |
+| `_starts_word` | từ ≥ 3 ký tự, bắt đầu trong nửa trái ô, dài > 1.5 × rộng ô | `scan_form.py:322` | Loại chữ cái đầu tiêu đề | "I" ở x=489, từ "INITIATIVE" bắt đầu x=487 | (mới) |
+| `SOFT_SHARPNESS` | 200 | `scan_form.py:241` | Dưới mức này là trang mờ | Data9.1 tr.4/6/7: 102/157/122; trang rõ 210–1320 | (mới) |
+| `SOFT_INK` | 40 | `scan_form.py:242` | Mực xám trung vị trên mức này là trang nhạt | Data9.1 tr.4: 98; Data6.1 tr.2: 46; trang đậm 7–35 | (mới) |
+| `TM_RESCUE` | 0.40 | `scan_form.py:349` | Cứu ô theo cột khi dấu to đè viền | Đo được 0.44–0.65 | 0.40 |
+| `RESCUE_FILL` | 0.12 | `scan_form.py:350` | Ô cứu theo cột phải có mực rõ | | 0.12 |
+| Số ô tối thiểu của cột | 3 | `scan_form.py:369` | Mới được cứu ô trong cột | Cột 2 ô → chữ đầu tiêu đề thành ô (Data1.1) | 3 |
+| `CHECKBOX_OCR_GLYPHS` | `( ) [] () [ ] CO J — – - © O) (C DC OC o O 0 u U LJ (1 OQ` | `scan_form.py:408` | Ký tự OCR được coi là ô | Data2.1 tr.3: `()`; Data5.1: `LJ`, `(1`, `OQ` | (mới) |
+| Lệch cột / cỡ ký tự | ≤ 25 px / ≤ 55 px | `scan_form.py:423` | Ký tự phải thẳng cột ô, cỡ bằng ô | | (mới) |
+| `CELL_DELTA` | 0.03 | `scan_form.py:26` | Ô bảng có dấu nếu mực > trung vị hàng + 0.03 | | 0.03 → 0.007 (8/11) → 0.03 |
+| `CELL_FAINT` | 0.012 | `scan_form.py:27` | Ô đậm nhất (khi không ô nào qua CELL_DELTA) | Tick nhạt Data9.1 +0.014; bóng Data6.1 +0.011 | (mới) |
+| `CELL_LEAD` | 0.5 | `scan_form.py:28` | Ô đậm nhất phải vượt ô thứ hai ≥ 50% | | (mới) |
+| `CELL_CLEAN` | 0.002 | `scan_form.py:29` | Hàng "sạch" nếu ô thứ hai ≤ trung vị + 0.002 | Data2.2: các ô khác = 0 | (mới) |
+| `CELL_CLEAN_MIN` | 0.005 | `scan_form.py:30` | Ở hàng sạch, ô đậm nhất chỉ cần > +0.005 | Data2.2 hàng 2: +0.008 | (mới) |
+| Nét kẻ bảng tối thiểu | 8 mm (ngang và dọc) | `detect_layout.py:133` | Độ dài tối thiểu để là đường kẻ | | ngang 8% bề rộng trang |
+| MORPH_CLOSE nét kẻ | 5 px | `detect_layout.py:135` | Nối nét kẻ bị đứt do scan | | (không có) |
+| Nở gom khối bảng | 7×7 | `detect_tables.py:29` | Gom nét ngang/dọc thành một bảng | | 5×5 |
+| Bảng tối thiểu | 30 × 12 mm | `detect_tables.py:34` | Kích thước khối bảng | | 30 × 12 mm |
+| Gộp đường gần | 1.5 mm | `detect_tables.py:39` | Gộp 2 nét kẻ quá sát | | 1.5 mm |
+| Bù cột mất viền | cột trung vị > 10 mm | `detect_tables.py:50` | Thêm cột khi mất viền phải (Data9.1) | | (không có) |
+| `CNN_RESCUE` | 0.90 | `scan_form.py:470` | CNN ≥ mức này thì cứu ô luật cho là trống | Mục 8.3 | (mới) |
+| `USE_CNN` | True | `scan_form.py:471` | Tắt bằng `--no-cnn`; tự tắt khi `--crops` | | (mới) |
 | `BOX_SCALE` / `CROP_SIZE` | 2.4 / 64 | `export_crops.py:27-28` | Ảnh cắt cho CNN (dùng chung khi học và khi chạy) | | 2.4 / 64 |
 | Số fold | 2, chia theo sinh viên | `train_marker.py:50-55` | Đánh giá chéo CNN | | (không có, test = mọi file thật) |
 | Epoch / batch / lr | 15 / 64 / 1e-3 | `train_marker.py` | Huấn luyện CNN | | như cũ |
 
 ### 8.5. Kết quả trên 28 tài liệu thật
 
-| Giai đoạn | Ô tìm được | Ô thừa | Dấu ở ô đúng | Sót dấu | Báo nhầm | Hàng bảng đúng |
+| Giai đoạn trong ngày | Ô tìm được | Ô thừa | Dấu ở ô đúng | Sót dấu | Báo nhầm | Hàng bảng đúng |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| A. Luật, sau sửa bảng (8.2.1–8.2.2, 8.2.5–8.2.6) | 729/759 | 9 | 154/169 | 15 | 9 | 196/197 |
+| A. Luật, sau sửa bảng (8.2.1–8.2.2, 8.2.6) | 729/759 | 9 | 154/169 | 15 | 9 | 196/197 |
 | B. + ngưỡng theo chất lượng trang (8.2.3) | 733/759 | 9 | 154/169 | 15 | 9 | 196/197 |
-| **C. + CNN cứu dấu, ngưỡng 0.90 (8.3)** | **733/759** | **9** | **160/169** | **9** | **9** | **196/197** |
+| C. + CNN cứu dấu, ngưỡng 0.90 (8.3) | 733/759 | 9 | 160/169 | 9 | 9 | 196/197 |
+| **D. + đặt ô cứu đúng vị trí, thêm ký tự (8.2.5) — cuối ngày** | **738/759** | **9** | **160/169** | **9** | **4** | **196/197** |
 
-**Chi tiết từng tài liệu ở giai đoạn C** (các tài liệu M03 `DataN.2` và 2 mẫu trắng: 0 lỗi dấu, bảng 12/12, trừ Data6.2 12/13):
+Tỉ lệ cuối ngày: tìm ô **97.2%**, nhận đúng dấu **94.7%** (precision **97.6%**), hàng bảng **99.5%**; mô phỏng **231/233 (99.1%), 0 báo nhầm**. Trên các ô **đã tìm thấy**, máy đọc đúng 100% ô có dấu.
+
+**Chi tiết từng tài liệu M02** (các tài liệu M03 `DataN.2` và 2 mẫu trắng: 0 lỗi dấu, bảng 12/12, trừ Data6.2 12/13):
 
 | Tài liệu | Ô tìm được | Ô thừa | Dấu đúng | Sót | Báo nhầm | Bảng |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
 | Data1.1 | 54/54 | 0 | 13/13 | 0 | 0 | 2/2 |
 | Data2.1 | 54/54 | 0 | 13/13 | 0 | 0 | 2/2 |
 | Data3.1 | 54/54 | 0 | 13/13 | 0 | 0 | 2/2 |
-| Data4.1 | 52/54 | 0 | 13/13 | 0 | 0 | 2/2 |
-| Data5.1 | 47/54 | 0 | 12/13 | 1 | 1 | 2/2 |
+| Data4.1 | 53/54 | 0 | 13/13 | 0 | 0 | 2/2 |
+| Data5.1 | 51/54 | 0 | 12/13 | 1 | 0 | 2/2 |
 | Data6.1 | 51/54 | 1 | 11/13 | 2 | 1 | 2/2 |
 | Data7.1 | 53/54 | 0 | 13/13 | 0 | 0 | 2/2 |
 | Data8.1 | 54/54 | 0 | 13/13 | 0 | 0 | 2/2 |
 | Data9.1 | 48/54 | 0 | 10/13 | 3 | 0 | 2/2 |
-| Data10.1 | 51/54 | 1 | 11/13 | 2 | 4 | 2/2 |
+| Data10.1 | 51/54 | 1 | 11/13 | 2 | 0 | 2/2 |
 | Data11.1 | 54/54 | 1 | 13/13 | 0 | 1 | 2/2 |
 | Data12.1 | 54/54 | 2 | 13/13 | 0 | 2 | 2/2 |
 | Data13.1 | 52/54 | 0 | 12/13 | 1 | 0 | 2/2 |
 
 * **6 dấu được CNN cứu** (đều đúng): Data5.1 tr.4 (CNN 0.93), Data6.1 tr.3 (1.00), Data6.1 tr.4 (0.97), Data9.1 tr.4 (0.98), Data9.1 tr.8 (1.00), Data13.1 tr.5 (1.00).
-* **9 dấu còn sót** đều nằm ở ô phần hình học **không tìm ra** (CNN không có ảnh để chấm), tập trung ở trang bị gắn cờ `needs_review`.
+* **Kiểm thử hồi quy:** `regress_baseline.json` đã cập nhật phủ **cả 28 tài liệu + 18 kịch bản mô phỏng (46 lượt)**; trạng thái cuối ngày đạt 46/46.
 
-**Kiểm thử hồi quy** (`regress.py`, 46 lượt): không lượt nào kém hơn `regress_baseline.json`; mô phỏng **231/233, 0 báo nhầm** (bằng baseline).
+### 8.6. Lỗi còn lại theo trang và vấn đề còn mở
 
-### 8.6. Vấn đề còn mở
+(⚑ = trang có cờ `needs_review`)
 
-1. **Ô in mảnh trên trang rất mờ** (Data9.1 tr.7 câu 8, Data5.1 tr.3–4): khớp mẫu < 0.55, ngưỡng không cứu được. Hiện dựa vào cờ `needs_review`. Hướng: học thêm mẫu riêng cho kiểu ô mảnh.
-2. **Ô thừa** (9): chữ cái/chữ viết tay giống ô (Data10.1 tr.3, Data12.1 tr.2, Data4.2/7.2/8.2).
-3. **Hàng bảng sai** (1): Data6.2 tr.1 hàng 2, tick quá nhạt.
-4. `regress_baseline.json` mới phủ 8 tài liệu; 20 tài liệu mới đang ở trạng thái "MỚI" (chưa có mốc so sánh).
+**Báo nhầm (4), đều là chữ cái đầu tiêu đề in hoa trên trang rõ:**
+
+| Tài liệu | Trang | Vị trí | Là gì |
+| :--- | :---: | :--- | :--- |
+| Data6.1 | 3 | (504, 1496) | "I" của "6.INDEPENDENCE" |
+| Data11.1 | 3 | (495, 1532) | "I" của "INDEPENDENCE" |
+| Data12.1 | 2 | (1107, 959) | chữ trong dòng "PHONG…" |
+| Data12.1 | 2 | (1092, 1411) | chữ trong tiêu đề "OBJECTIVES" |
+
+**Sót dấu (9), đều là ô không tìm ra (CNN không có ảnh để chấm):**
+
+| Tài liệu | Trang | Câu trả lời bị sót | Cờ |
+| :--- | :---: | :--- | :---: |
+| Data5.1 | 3 | Generally capable of learning new concepts… | |
+| Data6.1 | 2 | All objectives adequately objectives | ⚑ |
+| Data6.1 | 4 | Takes prompt action in response to suggestions… | |
+| Data9.1 | 4 | Excellent | ⚑ |
+| Data9.1 | 7 | Usually thorough. Generally, good work… | ⚑ |
+| Data9.1 | 7 | Generally understands the problems at hand… | ⚑ |
+| Data10.1 | 3 | Exceptional ability to learn new concepts… | |
+| Data10.1 | 5 | Takes prompt action in response to suggestions… | |
+| Data13.1 | 5 | Work usually required review, satisfactory work… | |
+
+**Sót ô trống (12):** Data4.1 tr.5 ⚑; Data5.1 tr.3, tr.4; Data6.1 tr.4; Data7.1 tr.5; Data7.2 tr.1; Data9.1 tr.7 ×3 ⚑; Data10.1 tr.5 (tìm ra nhưng lệch vị trí); Data13.1 tr.5; Data13.2 tr.1.
+
+**Ô thừa không dấu (5):** Data4.2 tr.2 (chữ viết tay "Prompt"), Data7.2 tr.1, Data8.2 tr.2 ×2 (chữ ký), Data10.1 tr.5 (ô lệch).
+
+**Bảng (1):** Data6.2 tr.1 hàng 2, tick cột 5 quá nhạt.
+
+**Hướng xử lý tiếp:**
+1. Cờ theo chất lượng trang chỉ bao **4/9** dấu bị sót; 5 trường hợp còn lại nằm trên trang rõ, do ô in kiểu khác. Kiểm tra theo câu hỏi (một câu chọn-1 có 0 hoặc ≥ 2 ô có dấu, task.md 3.5) sẽ bao được cả 9.
+2. Cả 4 báo nhầm là chữ cái đầu tiêu đề có số mục đứng trước ("6.", "5.") → loại theo số mục.
+3. Ô in kiểu mảnh (Data5.1, 10.1, 13.1; khớp 0.05–0.53 trên trang rõ) → học mẫu riêng cho kiểu ô này.
+4. Ô thừa do chữ viết tay/chữ ký trên trang M03.
 
 ### 8.7. Lệnh tái lập
 
@@ -384,68 +429,3 @@ python src/train_marker.py --fold -1                     # mô hình dùng thậ
 * **Mục 4.3:** cơ chế cứu ô trống ở ngưỡng 0.55 trong `_rescue_in_columns` đã được bỏ (đặt sai cỡ ô ở trang trộn ô to/nhỏ → regress mô phỏng sót thêm dấu). Data2.1 tr.3 nay được cứu bằng `_rescue_ocr_glyphs` (mục 8.2.5).
 * **Mục 4.4:** bổ sung bằng ngưỡng theo chất lượng trang + `_starts_word` (mục 8.2.3).
 * **Mục 5.3:** số liệu 498 ảnh là của 8 tài liệu; trên 1.753 ảnh của 28 tài liệu luật đạt F1 0.964 (không còn 1.000), CNN chỉ mô phỏng 0.910 (mục 8.3).
-
-### 8.9. Bổ sung cuối ngày 2026-11-15: ô in kiểu mảnh (Data5.1) và vị trí ô cứu từ ký tự OCR
-
-> Mục 8.5 giữ nguyên làm mốc giai đoạn C. Mục này là giai đoạn D, sau khi sửa thêm.
-
-**Hiện tượng (Data5.1):**
-* Ô "Can learn…" (tr.3) bị đánh dấu đỏ dù trống, trong khi tick thật nằm ở "Generally capable…".
-* Nhiều ô ở đầu tr.3–4 và tr.5 không tìm ra.
-
-**Nguyên nhân (đo được):**
-1. Các ô sót **không phải do mờ**: độ nét quanh ô 1.400–4.600, mực 16–34, tức là vùng rõ. Đó là ô in **kiểu khác** (nhỏ, viền mảnh), khớp mẫu chỉ **0.05–0.53**, thấp hơn cả `TM_LOW` = 0.55. Hạ ngưỡng sẽ không bắt được mà còn nhận chữ cái tiêu đề (khớp 0.556–0.597). OCR đọc các ô này thành `(1`, `O`, `C)`, `LJ`, `OQ`.
-2. Bước `_rescue_ocr_glyphs` đặt ô ở **x trung vị của cột** thay vì đúng chỗ ký tự. Cột lệch dần do nghiêng còn sót, nên ô bị trượt phải ~12 px, trùm lên chữ "C" của "Can" và bị tính là có dấu.
-3. Đáp án Data5.1 tr.4 ghi sai tọa độ 3 ô đầu trang (lệch 87–129 px theo chiều dọc so với ô thật).
-
-**Giải pháp:**
-* Ô cứu từ ký tự OCR được đặt **đúng tọa độ ký tự** (`src/scan_form.py`, `_rescue_ocr_glyphs`).
-* Thêm `LJ`, `(1`, `OQ` vào `CHECKBOX_OCR_GLYPHS`.
-* **Thử lại `C)`** (vì nghi lỗi cũ là do đặt sai vị trí): regress mô phỏng M02 seed 44 vẫn sót thêm 1 dấu ở ô nhỏ 24×24 → **giữ loại `C)`**.
-* Sửa đáp án Data5.1 tr.4: (523, 158) → (513, 279); (523, 258) → (515, 387); (523, 638) → (520, 723), lấy theo khung ký tự OCR.
-
-**Kết quả trên 28 tài liệu (giai đoạn D):**
-
-| Giai đoạn | Ô tìm được | Ô thừa | Dấu ở ô đúng | Sót dấu | Báo nhầm | Hàng bảng đúng |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| C. (mục 8.5) | 733/759 | 9 | 160/169 | 9 | 9 | 196/197 |
-| **D. + đặt ô cứu đúng vị trí, thêm ký tự** | **738/759** | **9** | **160/169** | **9** | **4** | **196/197** |
-
-* Thay đổi theo tài liệu: Data5.1 ô 47 → 51/54, báo nhầm 1 → 0; Data10.1 báo nhầm 4 → 0; Data4.1 ô 52 → 53/54.
-* Regress: không lượt nào kém baseline, mô phỏng 231/233, 0 báo nhầm.
-
-**Danh sách lỗi còn lại theo trang (⚑ = trang có cờ `needs_review`):**
-
-*Báo nhầm (4), đều là chữ cái đầu tiêu đề in hoa trên trang rõ:*
-
-| Tài liệu | Trang | Vị trí | Là gì |
-| :--- | :---: | :--- | :--- |
-| Data6.1 | 3 | (504, 1496) | "I" của "6.INDEPENDENCE" |
-| Data11.1 | 3 | (495, 1532) | "I" của "INDEPENDENCE" |
-| Data12.1 | 2 | (1107, 959) | chữ trong dòng "PHONG…" |
-| Data12.1 | 2 | (1092, 1411) | chữ trong tiêu đề "OBJECTIVES" |
-
-*Sót dấu (9), đều là ô không tìm ra:*
-
-| Tài liệu | Trang | Câu trả lời bị sót | Cờ |
-| :--- | :---: | :--- | :---: |
-| Data5.1 | 3 | Generally capable of learning new concepts… | |
-| Data6.1 | 2 | All objectives adequately objectives | ⚑ |
-| Data6.1 | 4 | Takes prompt action in response to suggestions… | |
-| Data9.1 | 4 | Excellent | ⚑ |
-| Data9.1 | 7 | Usually thorough. Generally, good work… | ⚑ |
-| Data9.1 | 7 | Generally understands the problems at hand… | ⚑ |
-| Data10.1 | 3 | Exceptional ability to learn new concepts… | |
-| Data10.1 | 5 | Takes prompt action in response to suggestions… | |
-| Data13.1 | 5 | Work usually required review, satisfactory work… | |
-
-*Sót ô trống (12):* Data4.1 tr.5 ⚑; Data5.1 tr.3, tr.4; Data6.1 tr.4; Data7.1 tr.5; Data7.2 tr.1; Data9.1 tr.7 ×3 ⚑; Data10.1 tr.5 (tìm ra nhưng lệch vị trí); Data13.1 tr.5; Data13.2 tr.1.
-
-*Ô thừa không dấu (5):* Data4.2 tr.2 (chữ viết tay "Prompt"), Data7.2 tr.1, Data8.2 tr.2 ×2 (chữ ký), Data10.1 tr.5 (ô lệch).
-
-*Bảng (1):* Data6.2 tr.1 hàng 2, tick cột 5 quá nhạt.
-
-**Nhận xét:**
-* Cờ `needs_review` theo chất lượng trang chỉ bao được **4/9** dấu bị sót. 5 trường hợp còn lại nằm trên trang rõ, do ô in kiểu khác. Kiểm tra theo câu hỏi (một câu chọn-1 có 0 hoặc ≥ 2 ô có dấu, task.md 3.5) sẽ bao được cả 9.
-* Cả 4 báo nhầm còn lại đều là chữ cái đầu tiêu đề có số mục đứng trước ("6.", "5."). Đây là hướng loại tiếp theo.
-

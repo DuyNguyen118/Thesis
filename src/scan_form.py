@@ -23,7 +23,6 @@ from common import MODELS, TRUTH
 from detect_layout import binarize, find_checkboxes, find_table_lines, render_pages
 from detect_tables import draw_mark, find_tables
 
-BOX_DELTA = 0.06     # ô vuông có dấu nếu mực trong ô cao hơn ô trống bấy nhiêu
 CELL_DELTA = 0.03    # ô bảng có dấu nếu mực vùng giữa ô cao hơn ô trống cùng hàng bấy nhiêu
 CELL_FAINT = 0.012   # không ô nào qua CELL_DELTA: lấy ô đậm nhất nếu cao hơn trung vị bấy nhiêu (tick mảnh, Data9.1 +0.014)
 CELL_LEAD = 0.5      # ... và vượt ô đậm thứ hai >= 50% khoảng cách tới trung vị (bóng mờ ở ô bên cạnh, Data6.1 +0.011)
@@ -141,7 +140,6 @@ def center_ink(bw, x0, y0, x1, y1, ratio=0.5):
 TM_MARGIN = 4        # viền thêm quanh ô khi cắt mẫu
 TM_LOW = 0.55        # ngưỡng thấp hơn, chỉ chấp nhận nếu khung ô còn thấy rõ (ô bị nét vẽ che bớt viền)
 TM_FRAME = 0.60      # khớp dưới mức này (ô in mảnh/nhạt hơn mẫu, Data9.1 trang 7) phải còn >= 3 cạnh thẳng mới là ô
-TM_THRESHOLD = 0.75  # độ giống viền ô tối thiểu để coi là ô vuông (ô thật >= 0.85, chữ cái <= 0.61)
 IN_WORD_SHIFT = 0.6  # ô lệch vào trong từ OCR >= 0.6 * chiều rộng ô mới bị coi là chữ cái (cũ: 0.3 -> sót ô có tick)
 NEIGHBOR_GAP = 3.0   # 2 ô cùng dòng cách nhau < 3 * rộng ô -> ô bên phải là chữ cái đầu nhãn (ô bảng cách ~270px)
 WORD_MAX_H = 1.5    # "từ" OCR cao hơn 1.5 * trung vị chiều cao từ là cụm dấu vẽ tay (66-82px vs chữ ~40px)
@@ -154,7 +152,6 @@ def ink_fill(bw, x, y, w, h):
     return float(inner.mean()) / 255.0 if inner.size else 0.0
 
 
-HALO_DELTA = 0.01    # mực ở vùng quanh ô (trái/trên/dưới) cao hơn ô khác bấy nhiêu -> dấu tràn/khoanh ngoài ô
 HALO_ONLY = 0.06     # vành quanh ô nhiều mực dù ruột trống -> khoanh tròn to bao ngoài ô (Data1.1: ô trống halo <= 0.005)
 
 
@@ -239,44 +236,6 @@ def sides_present(bw, x, y, w, h, need=3, frac=0.8, band=3):
     left = bw[y0:y1, x0:x0 + band * 2]
     right = bw[y0:y1, x1 - band * 2:x1]
     return sum([side(top, 0), side(bot, 0), side(left, 1), side(right, 1)]) >= need
-
-
-def _ring_ink(bw, x, y, w, h, gap=3, thick=5):
-    """Mật độ mực ở vành ngay bên ngoài khung ô."""
-    H, W = bw.shape
-    x0, y0, x1, y1 = max(0, x - gap - thick), max(0, y - gap - thick), min(W, x + w + gap + thick), min(H, y + h + gap + thick)
-    big = bw[y0:y1, x0:x1].copy()
-    ix0, iy0 = max(0, x - gap) - x0, max(0, y - gap) - y0
-    big[iy0:iy0 + h + 2 * gap, ix0:ix0 + w + 2 * gap] = 0
-    return float((big > 0).mean())
-
-
-def frame_ok(bw, x, y, w, h, need_sides=3, need_corners=3):
-    """Giống khung ô thật: cạnh thẳng, góc vuông có mực, quanh ô trống (loại chữ D, O, cụm chữ...)."""
-    if not sides_present(bw, x, y, w, h, need=need_sides, frac=0.8):
-        return False
-    H, W = bw.shape
-    pts = [(x, y), (x + w - 4, y), (x, y + h - 4), (x + w - 4, y + h - 4)]
-    ok = sum(float((bw[max(0, py):py + 4, max(0, px):px + 4] > 0).mean()) > 0.3 for px, py in pts)
-    return ok >= need_corners and _ring_ink(bw, x, y, w, h) <= 0.08
-
-
-def find_boxes_by_lines(bw, w, h):
-    """Tìm khung ô bằng 4 cạnh thẳng: bắt được ô mà nét vẽ (khoanh tròn...) che mất một phần viền."""
-    hz = cv2.morphologyEx(bw, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (int(0.7 * w), 1)))
-    vt = cv2.morphologyEx(bw, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (1, int(0.7 * h))))
-    m = cv2.dilate(cv2.bitwise_or(hz, vt), np.ones((3, 3), np.uint8))
-    n, _, stats, _ = cv2.connectedComponentsWithStats(m, connectivity=8)
-    out = []
-    for i in range(1, n):
-        x, y, cw, ch, _ = stats[i]
-        x, y, cw, ch = x + 1, y + 1, cw - 2, ch - 2   # bỏ phần nở của dilate
-        if not (abs(cw - w) <= 0.12 * w and abs(ch - h) <= 0.12 * h):
-            continue
-        if not frame_ok(bw, x, y, cw, ch, need_sides=3, need_corners=3):
-            continue
-        out.append((x, y, cw, ch))
-    return out
 
 
 SOFT_SHARPNESS = 200  # phương sai Laplacian dưới mức này là trang mờ (Data9.1 trang 7: 122; trang rõ 280-1300)
@@ -560,10 +519,8 @@ def scan_tables(bw, words, n_score):
         has_header = (is_num or is_word) and len(rows) >= 3
 
         if has_header:
-            if is_num or sum(h.strip() == str(i + 1) for i, h in enumerate(raw_header)) > len(raw_header) / 2:
-                header = [str(i + 1) for i in range(len(raw_header))]
-            else:
-                header = raw_header
+            # thang số 1..n: chuẩn hóa luôn, sửa ô OCR đọc sai ("e)" thay vì "3")
+            header = [str(i + 1) for i in range(len(raw_header))] if is_num else raw_header
             start_r = 1
         else:
             header = [str(i + 1) for i in range(n_score)]
@@ -576,12 +533,11 @@ def scan_tables(bw, words, n_score):
             base = float(np.median(inks))
             marked = [i for i, v in enumerate(inks) if v - base > CELL_DELTA]
             if not marked and len(inks) >= 2:
-                top, second = sorted(inks)[-1], sorted(inks)[-2]
+                second, top = sorted(inks)[-2:]
                 faint = top - base > CELL_FAINT or (second - base <= CELL_CLEAN and top - base > CELL_CLEAN_MIN)
                 if faint and top - second >= CELL_LEAD * (top - base):
                     marked = [inks.index(top)]
-            row_idx = r if start_r == 1 else (r + 1)
-            data.append({"row": row_idx,
+            data.append({"row": r + 1 - start_r,   # hàng dữ liệu đánh số từ 1 dù bảng có hay không có tiêu đề
                          # đọc từng cột nhãn riêng (cột STT "8." + cột nội dung 2 dòng) rồi ghép lại
                          "label": " ".join(s for s in (text_in(words, cols[c], rows[r], cols[c + 1], rows[r + 1])
                                                        for c in range(first)) if s),

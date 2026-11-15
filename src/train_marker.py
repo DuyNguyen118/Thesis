@@ -29,7 +29,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
 
-from common import CROPS, MODELS, ROOT
+from common import CROPS, MODELS
 
 VAL_FRAC = 0.15      # tỉ lệ tài liệu mô phỏng giữ lại làm val
 THRESH = 0.5         # xác suất "có dấu" >= ngưỡng -> marked

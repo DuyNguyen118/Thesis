@@ -21,7 +21,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from common import BASELINE, ROOT, SAMPLES, SIM_CONFIGS, SIM_FORMS, TRUTH, run_scan
+from common import BASELINE, SAMPLES, SIM_CONFIGS, SIM_FORMS, TRUTH, run_scan
 from evaluate import evaluate, summary
 
 LABEL_DROP = 2.0     # độ giống nhãn trung bình được phép giảm tối đa (dao động nhỏ do OCR)

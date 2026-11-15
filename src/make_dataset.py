@@ -16,14 +16,13 @@ import csv
 import os
 import random
 import shutil
-import sys
 import tempfile
 import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from common import CROPS, ROOT, SAMPLES, SIM_FORMS, TRUTH, run_scan
+from common import CROPS, SAMPLES, SIM_FORMS, TRUTH, run_scan
 
 STYLES = "cross,tick,circle,fill,dash"
 

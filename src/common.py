@@ -11,7 +11,6 @@ SAMPLES = DATA / "samples"
 TRUTH = DATA / "truth"
 CROPS = DATA / "crops"
 MODELS = ROOT / "models"
-OUTPUT = ROOT / "output"
 BASELINE = ROOT / "regress_baseline.json"
 
 # Danh sách mẫu form và cấu hình mô phỏng chuẩn

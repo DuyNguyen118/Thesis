@@ -1,0 +1,190 @@
+{
+  "sim M02 --seed 1": {
+    "ok": 10,
+    "total": 10,
+    "missed": 0,
+    "fp": 0
+  },
+  "sim M02 --seed 7 --overshoot 0.3 --rotate 1.5": {
+    "ok": 16,
+    "total": 16,
+    "missed": 0,
+    "fp": 0
+  },
+  "sim M02 --seed 3 --mixed": {
+    "ok": 14,
+    "total": 14,
+    "missed": 0,
+    "fp": 0
+  },
+  "sim M02 --seed 5 --overshoot 0.5 --rotate -1.0": {
+    "ok": 20,
+    "total": 20,
+    "missed": 0,
+    "fp": 0
+  },
+  "sim M02 --seed 11 --overshoot 0.4 --rotate 2.0 --mixed": {
+    "ok": 15,
+    "total": 16,
+    "missed": 1,
+    "fp": 0
+  },
+  "sim M02 --seed 21 --overshoot 0.5 --rotate -1.8": {
+    "ok": 14,
+    "total": 15,
+    "missed": 1,
+    "fp": 0
+  },
+  "sim M02 --seed 33 --mixed --rotate 0.8": {
+    "ok": 7,
+    "total": 7,
+    "missed": 0,
+    "fp": 0
+  },
+  "sim M02 --seed 44 --overshoot 0.3 --mixed": {
+    "ok": 12,
+    "total": 12,
+    "missed": 0,
+    "fp": 0
+  },
+  "sim M02 --seed 55 --overshoot 0.2 --rotate 1.0 --mixed": {
+    "ok": 15,
+    "total": 15,
+    "missed": 0,
+    "fp": 0
+  },
+  "sim M03 --seed 1": {
+    "ok": 12,
+    "total": 12,
+    "missed": 0,
+    "fp": 0
+  },
+  "sim M03 --seed 7 --overshoot 0.3 --rotate 1.5": {
+    "ok": 12,
+    "total": 12,
+    "missed": 0,
+    "fp": 0
+  },
+  "sim M03 --seed 3 --mixed": {
+    "ok": 12,
+    "total": 12,
+    "missed": 0,
+    "fp": 0
+  },
+  "sim M03 --seed 5 --overshoot 0.5 --rotate -1.0": {
+    "ok": 12,
+    "total": 12,
+    "missed": 0,
+    "fp": 0
+  },
+  "sim M03 --seed 11 --overshoot 0.4 --rotate 2.0 --mixed": {
+    "ok": 12,
+    "total": 12,
+    "missed": 0,
+    "fp": 0
+  },
+  "sim M03 --seed 21 --overshoot 0.5 --rotate -1.8": {
+    "ok": 12,
+    "total": 12,
+    "missed": 0,
+    "fp": 0
+  },
+  "sim M03 --seed 33 --mixed --rotate 0.8": {
+    "ok": 12,
+    "total": 12,
+    "missed": 0,
+    "fp": 0
+  },
+  "sim M03 --seed 44 --overshoot 0.3 --mixed": {
+    "ok": 12,
+    "total": 12,
+    "missed": 0,
+    "fp": 0
+  },
+  "sim M03 --seed 55 --overshoot 0.2 --rotate 1.0 --mixed": {
+    "ok": 12,
+    "total": 12,
+    "missed": 0,
+    "fp": 0
+  },
+  "real Data1.1": {
+    "err": 0,
+    "label": 99.6,
+    "missed": 0,
+    "extra": 0,
+    "fn": 0,
+    "fp": 0,
+    "rows_ok": 2,
+    "rows": 2
+  },
+  "real Data1.2": {
+    "err": 0,
+    "label": null,
+    "missed": 0,
+    "extra": 0,
+    "fn": 0,
+    "fp": 0,
+    "rows_ok": 12,
+    "rows": 12
+  },
+  "real M02_Intern-evaluation-template": {
+    "err": 0,
+    "label": 100.0,
+    "missed": 0,
+    "extra": 0,
+    "fn": 0,
+    "fp": 0,
+    "rows_ok": 2,
+    "rows": 2
+  },
+  "real M03_LABOUR-MARKET-FEEDBACK": {
+    "err": 0,
+    "label": null,
+    "missed": 0,
+    "extra": 0,
+    "fn": 0,
+    "fp": 0,
+    "rows_ok": 12,
+    "rows": 12
+  },
+  "real Data2.1": {
+    "err": 0,
+    "label": 99.9,
+    "missed": 0,
+    "extra": 0,
+    "fn": 0,
+    "fp": 0,
+    "rows_ok": 2,
+    "rows": 2
+  },
+  "real Data2.2": {
+    "err": 1,
+    "label": null,
+    "missed": 0,
+    "extra": 1,
+    "fn": 0,
+    "fp": 0,
+    "rows_ok": 12,
+    "rows": 12
+  },
+  "real Data3.1": {
+    "err": 0,
+    "label": 100.0,
+    "missed": 0,
+    "extra": 0,
+    "fn": 0,
+    "fp": 0,
+    "rows_ok": 2,
+    "rows": 2
+  },
+  "real Data3.2": {
+    "err": 0,
+    "label": 100.0,
+    "missed": 0,
+    "extra": 0,
+    "fn": 0,
+    "fp": 0,
+    "rows_ok": 12,
+    "rows": 12
+  }
+}

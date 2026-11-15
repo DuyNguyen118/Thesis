@@ -28,7 +28,7 @@ def find_tables(bw, dpi=DPI):
     """
     mm = dpi / 25.4
     horiz, vert = find_table_lines(bw, dpi)
-    lines = cv2.dilate(cv2.bitwise_or(horiz, vert), np.ones((5, 5), np.uint8))
+    lines = cv2.dilate(cv2.bitwise_or(horiz, vert), np.ones((7, 7), np.uint8))
     n, labels, stats, _ = cv2.connectedComponentsWithStats(lines, connectivity=8)
     tables = []
     for i in range(1, n):
@@ -42,7 +42,21 @@ def find_tables(bw, dpi=DPI):
         cols = merge_close([p + x for p in group_positions(vt, axis=0)], int(1.5 * mm))
         if len(rows) < 3 or len(cols) < 3:
             continue
-        tables.append({"x": x, "y": y, "w": w, "h": h, "rows": rows, "cols": cols})
+        # Bổ sung cột nếu đường ngang kéo dài vượt ra ngoài đường kẻ dọc ngoài cùng
+        # (trường hợp bảng bị scan cắt mất nét viền hoặc đứt viền ngoài cùng như Data9.1)
+        if len(cols) >= 2:
+            hz_cols = np.where((hz > 0).any(axis=0))[0] + x
+            if len(hz_cols):
+                hz_x0, hz_x1 = int(hz_cols[0]), int(hz_cols[-1])
+                med_w = float(np.median(np.diff(cols)))
+                if med_w > 10 * mm:
+                    extra_r = int(round((hz_x1 - cols[-1]) / med_w))
+                    for _ in range(extra_r):
+                        cols.append(int(round(cols[-1] + med_w)))
+                    extra_l = int(round((cols[0] - hz_x0) / med_w))
+                    for _ in range(extra_l):
+                        cols.insert(0, int(round(cols[0] - med_w)))
+        tables.append({"x": int(x), "y": int(y), "w": int(w), "h": int(h), "rows": rows, "cols": cols})
     tables.sort(key=lambda t: t["y"])
     return tables
 
@@ -80,7 +94,7 @@ def analyze_table(bw, t, n_score):
     return results
 
 
-def draw_mark(img, box, style, rng):
+def draw_mark(img, box, style, rng, ink=(0, 0, 0)):
     x0, y0, x1, y1 = box
     w, h = x1 - x0, y1 - y0
     cx = (x0 + x1) // 2 + rng.randint(-w // 10, w // 10)
@@ -88,13 +102,18 @@ def draw_mark(img, box, style, rng):
     r = int(min(w, h) * 0.28)
     t = 4
     if style == "cross":
-        cv2.line(img, (cx - r, cy - r), (cx + r, cy + r), (0, 0, 0), t)
-        cv2.line(img, (cx - r, cy + r), (cx + r, cy - r), (0, 0, 0), t)
+        cv2.line(img, (cx - r, cy - r), (cx + r, cy + r), ink, t)
+        cv2.line(img, (cx - r, cy + r), (cx + r, cy - r), ink, t)
     elif style == "tick":
         pts = np.array([[cx - r, cy], [cx - r // 3, cy + r], [cx + r, cy - r]], np.int32)
-        cv2.polylines(img, [pts], False, (0, 0, 0), t)
+        cv2.polylines(img, [pts], False, ink, t)
+    elif style == "fill":   # tô kín bằng nét ngoằn ngoèo dày đặc
+        pts = np.array([[x, cy - r if i % 2 else cy + r] for i, x in enumerate(range(cx - r, cx + r + 1, t))], np.int32)
+        cv2.polylines(img, [pts], False, ink, t)
+    elif style == "dash":   # gạch ngang
+        cv2.line(img, (cx - r, cy), (cx + r, cy), ink, t)
     else:
-        cv2.circle(img, (cx, cy), r, (0, 0, 0), t)
+        cv2.circle(img, (cx, cy), r, ink, t)
 
 
 def annotate(img, t, results, n_score):

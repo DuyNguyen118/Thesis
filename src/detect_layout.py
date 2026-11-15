@@ -162,11 +162,13 @@ def find_checkboxes(bw, dpi=DPI, words=None):
 
 def find_table_lines(bw, dpi=DPI):
     """Tìm đường kẻ ngang/dọc dài bằng morphology."""
-    h, w = bw.shape
-    min_len_h = int(w * 0.08)
-    min_len_v = int(dpi / 25.4 * 8)
-    horiz = cv2.morphologyEx(bw, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (min_len_h, 1)))
-    vert = cv2.morphologyEx(bw, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (1, min_len_v)))
+    mm = dpi / 25.4
+    min_len_h = int(mm * 8)
+    min_len_v = int(mm * 8)
+    bw_h = cv2.morphologyEx(bw, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 1)))
+    bw_v = cv2.morphologyEx(bw, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (1, 5)))
+    horiz = cv2.morphologyEx(bw_h, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (min_len_h, 1)))
+    vert = cv2.morphologyEx(bw_v, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (1, min_len_v)))
     return horiz, vert
 
 

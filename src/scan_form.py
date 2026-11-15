@@ -18,12 +18,17 @@ from pathlib import Path
 import cv2
 import numpy as np
 import pytesseract
+from common import TRUTH
 
 from detect_layout import binarize, find_checkboxes, find_table_lines, render_pages
 from detect_tables import draw_mark, find_tables
 
 BOX_DELTA = 0.06     # ô vuông có dấu nếu mực trong ô cao hơn ô trống bấy nhiêu
 CELL_DELTA = 0.03    # ô bảng có dấu nếu mực vùng giữa ô cao hơn ô trống cùng hàng bấy nhiêu
+CELL_FAINT = 0.012   # không ô nào qua CELL_DELTA: lấy ô đậm nhất nếu cao hơn trung vị bấy nhiêu (tick mảnh, Data9.1 +0.014)
+CELL_LEAD = 0.5      # ... và vượt ô đậm thứ hai >= 50% khoảng cách tới trung vị (bóng mờ ở ô bên cạnh, Data6.1 +0.011)
+CELL_CLEAN = 0.002   # hàng sạch (PDF điện tử, ô khác ~0 mực) thì chỉ cần cao hơn CELL_CLEAN_MIN (Data2.2 +0.008)
+CELL_CLEAN_MIN = 0.005
 
 
 def remove_lines(img, bw):
@@ -135,6 +140,7 @@ def center_ink(bw, x0, y0, x1, y1, ratio=0.5):
 
 TM_MARGIN = 4        # viền thêm quanh ô khi cắt mẫu
 TM_LOW = 0.55        # ngưỡng thấp hơn, chỉ chấp nhận nếu khung ô còn thấy rõ (ô bị nét vẽ che bớt viền)
+TM_FRAME = 0.60      # khớp dưới mức này (ô in mảnh/nhạt hơn mẫu, Data9.1 trang 7) phải còn >= 3 cạnh thẳng mới là ô
 TM_THRESHOLD = 0.75  # độ giống viền ô tối thiểu để coi là ô vuông (ô thật >= 0.85, chữ cái <= 0.61)
 IN_WORD_SHIFT = 0.6  # ô lệch vào trong từ OCR >= 0.6 * chiều rộng ô mới bị coi là chữ cái (cũ: 0.3 -> sót ô có tick)
 NEIGHBOR_GAP = 3.0   # 2 ô cùng dòng cách nhau < 3 * rộng ô -> ô bên phải là chữ cái đầu nhãn (ô bảng cách ~270px)
@@ -273,8 +279,25 @@ def find_boxes_by_lines(bw, w, h):
     return out
 
 
-def find_boxes_by_template(bw, tpls, words=None):
-    """Tìm ô vuông bằng khớp mẫu: vẫn nhận ra ô khi có nét tick/gạch chéo đè lên viền."""
+SOFT_SHARPNESS = 200  # phương sai Laplacian dưới mức này là trang mờ (Data9.1 trang 7: 122; trang rõ 280-1300)
+SOFT_INK = 40         # mực in có độ xám trung vị trên mức này là trang nhạt (Data9.1 trang 4: 98; trang đậm 7-35)
+
+
+def page_is_soft(img, bw):
+    """Trang scan mờ hoặc mực nhạt: ô in mảnh chỉ khớp mẫu 0.55-0.60, được dùng ngưỡng TM_LOW.
+
+    Trang rõ giữ ngưỡng TM_FRAME vì ở đó điểm khớp 0.55-0.60 hầu hết là chữ cái đầu tiêu đề (Data1.1, Data3.1).
+    """
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    ink = gray[bw > 0]
+    return (cv2.Laplacian(gray, cv2.CV_64F).var() < SOFT_SHARPNESS
+            or (ink.size > 0 and float(np.median(ink)) > SOFT_INK))
+
+
+def find_boxes_by_template(bw, tpls, words=None, low=TM_FRAME):
+    """Tìm ô vuông bằng khớp mẫu: vẫn nhận ra ô khi có nét tick/gạch chéo đè lên viền.
+
+    `low` là điểm khớp tối thiểu: TM_FRAME cho trang rõ, TM_LOW cho trang mờ (page_is_soft)."""
     cand = []
     H, W = bw.shape
     bwf = bw.astype(np.float32)
@@ -283,7 +306,7 @@ def find_boxes_by_template(bw, tpls, words=None):
         res = 1.0 - cv2.matchTemplate(bwf, tpl["img"], cv2.TM_SQDIFF_NORMED, mask=tpl["mask"])
         res = np.nan_to_num(res, nan=0.0)
         res_maps.append(res)
-        ys, xs = np.where(res >= 0.60)
+        ys, xs = np.where(res >= low)
         for px, py in zip(xs, ys):
             cand.append((float(res[py, px]), int(px) + TM_MARGIN + tpl["w"] / 2,
                          int(py) + TM_MARGIN + tpl["h"] / 2, ti))
@@ -303,6 +326,9 @@ def find_boxes_by_template(bw, tpls, words=None):
         d = 0.7 * t["w"]
         if all((cx - kx) ** 2 + (cy - ky) ** 2 >= min(d, 0.7 * tpls[kt]["w"]) ** 2
                for _, kx, ky, kt in kept):
+            if score < TM_FRAME and (not sides_present(bw, bx, by, t["w"], t["h"], need=3, frac=0.7)
+                                     or (words and _starts_word(words, bx, by, t["w"], t["h"]))):
+                continue
             kept.append((score, cx, cy, ti))
 
     # Lọc tính thẳng hàng của cột ô checkbox: loại bỏ các điểm nhiễu ngẫu nhiên
@@ -329,6 +355,16 @@ def find_boxes_by_template(bw, tpls, words=None):
 
     boxes.sort(key=lambda b: (b["y"], b["x"]))
     return boxes
+
+
+def _starts_word(words, x, y, w, h):
+    """Một từ OCR dài bắt đầu ngay trong ô -> ô là chữ cái đầu của từ đó ("I" của "INITIATIVE", Data1.1).
+
+    Chỉ dùng cho điểm khớp yếu: ô thật có dấu tick hay bị OCR gộp vào từ đầu nhãn ("WVery") nhưng khớp >= TM_FRAME.
+    """
+    cy = y + h / 2
+    return any(len(mw["text"].strip()) >= 3 and x - 3 <= mw["x"] <= x + 0.5 * w and mw["x"] + mw["w"] > x + 1.5 * w
+               and mw["y"] <= cy <= mw["y"] + mw["h"] for mw in words)
 
 
 def _inside_word(words, cx, cy, bw_):
@@ -367,44 +403,81 @@ def _rescue_in_columns(bw, tpls, res_maps, boxes, words):
     cols.append(cur)
     base = float(np.median([b["fill"] for b in boxes]))
     found = []
-    for col, ti in ((c, ti) for c in cols if len(c) >= 3 for ti in range(len(tpls))):
-        # thử mọi mẫu: một cột có thể trộn ô to/nhỏ (--mixed)
-        t, res = tpls[ti], res_maps[ti]
-        x0 = max(0, min(b["x"] for b in col) - 8 - TM_MARGIN)
-        x1 = min(res.shape[1], max(b["x"] for b in col) + 9 - TM_MARGIN)
-        if x1 <= x0:
+    for col in cols:
+        if len(col) < 3:   # cột 2 ô dễ là chữ cái đầu tiêu đề + 1 ô (Data1.1 "INITIATIVE")
             continue
-        strip = res[:, x0:x1]
-        best_x = strip.argmax(axis=1)
-        best = strip.max(axis=1)
-        for py in np.argsort(-best):
-            if best[py] < TM_RESCUE:
-                break
-            x, y = int(x0 + best_x[py] + TM_MARGIN), int(py + TM_MARGIN)
-            if y < 0.04 * H or y > 0.93 * H:
+        for ti in range(len(tpls)):
+            # thử mọi mẫu: một cột có thể trộn ô to/nhỏ (--mixed)
+            t, res = tpls[ti], res_maps[ti]
+            x0 = max(0, min(b["x"] for b in col) - 8 - TM_MARGIN)
+            x1 = min(res.shape[1], max(b["x"] for b in col) + 9 - TM_MARGIN)
+            if x1 <= x0:
                 continue
-            if any(abs(o["y"] - y) < 0.8 * o["h"] and abs(o["x"] - x) < o["w"] for o in boxes + found):
-                continue
-            cx, cy = x + t["w"] / 2, y + t["h"] / 2
-            if words and _inside_word(words, cx, cy, t["w"]):
-                continue
-            fill = ink_fill(bw, x, y, t["w"], t["h"])
-            b = {"x": x, "y": y, "w": t["w"], "h": t["h"], "tpl": ti, "fill": fill,
-                 "match": round(float(best[py]), 2), "rescued": True}
-            if fill <= base + RESCUE_FILL and halo_fill(bw, b) <= HALO_ONLY:
-                continue
-            if words is not None and not text_right_of(b, words):
-                continue
-            found.append(b)
+            strip = res[:, x0:x1]
+            best_x = strip.argmax(axis=1)
+            best = strip.max(axis=1)
+            for py in np.argsort(-best):
+                if best[py] < TM_RESCUE:
+                    break
+                x, y = int(x0 + best_x[py] + TM_MARGIN), int(py + TM_MARGIN)
+                if y < 0.04 * H or y > 0.93 * H:
+                    continue
+                if any(abs(o["y"] - y) < 0.8 * o["h"] and abs(o["x"] - x) < o["w"] for o in boxes + found):
+                    continue
+                cx, cy = x + t["w"] / 2, y + t["h"] / 2
+                if words and _inside_word(words, cx, cy, t["w"]):
+                    continue
+                fill = ink_fill(bw, x, y, t["w"], t["h"])
+                b = {"x": x, "y": y, "w": t["w"], "h": t["h"], "tpl": ti, "fill": fill,
+                     "match": round(float(best[py]), 2), "rescued": True}
+                if fill <= base + RESCUE_FILL and halo_fill(bw, b) <= HALO_ONLY:
+                    continue
+                if words is not None and not text_right_of(b, words):
+                    continue
+                found.append(b)
+        found += _rescue_ocr_glyphs(bw, col, boxes + found, words)
     return found
 
 
-def scan_boxes(bw, words, tpls):
+# OCR hay đọc ô vuông mờ thành các ký tự này (Data2.1 trang 3: ô khớp mẫu 0.57 bị đọc thành "()").
+# Không có "(|", "C)": đó là ô viền mảnh (--mixed) mà khi đã tick thì vẫn không tìm lại được -> sót dấu trong regress
+CHECKBOX_OCR_GLYPHS = {")", "(", "[]", "()", "[ ]", "CO", "J", "—", "–", "-", "©", "O)", "(C", "DC", "OC",
+                       "o", "O", "0", "u", "U"}
+
+
+def _rescue_ocr_glyphs(bw, col, known, words):
+    """Cứu ô mà OCR đọc thành ký tự kiểu "()", "J" nằm thẳng cột ô đã biết và có nhãn bên phải."""
+    if not words:
+        return []
+    H = bw.shape[0]
+    col_x = int(np.median([b["x"] for b in col]))
+    # cỡ ô lấy theo các ô cùng cột (trang trộn ô to/nhỏ), không mặc định mẫu đầu tiên
+    col_w, col_h = int(np.median([b["w"] for b in col])), int(np.median([b["h"] for b in col]))
+    col_tpl = max(set(b["tpl"] for b in col), key=[b["tpl"] for b in col].count)
+    out = []
+    for w in words:
+        if w["text"].strip() not in CHECKBOX_OCR_GLYPHS or abs(w["x"] - col_x) > 25 or w["w"] > 55 or w["h"] > 55:
+            continue
+        if w["y"] < 0.04 * H or w["y"] > 0.93 * H:
+            continue
+        if any(abs(o["y"] - w["y"]) < 0.8 * o["h"] for o in known + out):
+            continue
+        b = {"x": col_x, "y": w["y"], "w": col_w, "h": col_h, "tpl": col_tpl, "match": 0.50, "rescued": True}
+        if text_right_of(b, words):
+            b["fill"] = ink_fill(bw, col_x, w["y"], col_w, col_h)
+            out.append(b)
+    return out
+
+
+def scan_boxes(bw, words, tpls, low=TM_FRAME):
     if tpls:
-        boxes = find_boxes_by_template(bw, tpls, words=words)
+        boxes = find_boxes_by_template(bw, tpls, words=words, low=low)
     else:
+        # không học được mẫu (trang ít ô): bỏ ô không có nhãn bên phải (nét chữ ký, con dấu - Data2.2)
         boxes = [{"x": x, "y": y, "w": w, "h": h, "fill": f, "tpl": 0}
                  for (x, y, w, h, f) in find_checkboxes(bw, words=words)]
+        if words is not None:
+            boxes = [b for b in boxes if text_right_of(b, words)]
     if not boxes:
         return boxes, 0.0
     for b in boxes:
@@ -427,19 +500,37 @@ def scan_tables(bw, words, n_score):
     for ti, t in enumerate(find_tables(bw)):
         rows, cols = t["rows"], t["cols"]
         ncol = len(cols) - 1
-        if ncol <= n_score or len(rows) < 3:
+        if ncol <= n_score or len(rows) < 2:
             continue
         first = ncol - n_score
-        header = [text_in(words, cols[c], rows[0], cols[c + 1], rows[1]) for c in range(first, ncol)]
-        if sum(h.strip() == str(i + 1) for i, h in enumerate(header)) > len(header) / 2:
-            header = [str(i + 1) for i in range(len(header))]   # thang số 1..n, sửa ô OCR đọc sai ("e)" thay vì "3")
+        raw_header = [text_in(words, cols[c], rows[0], cols[c + 1], rows[1]) for c in range(first, ncol)]
+        is_num = sum(h.strip() in (str(i + 1), f"({i+1})") for i, h in enumerate(raw_header)) >= 2
+        is_word = any(w in " ".join(raw_header).lower() for w in ["poor", "fair", "satisfactory", "good", "excellent"])
+        has_header = (is_num or is_word) and len(rows) >= 3
+
+        if has_header:
+            if is_num or sum(h.strip() == str(i + 1) for i, h in enumerate(raw_header)) > len(raw_header) / 2:
+                header = [str(i + 1) for i in range(len(raw_header))]
+            else:
+                header = raw_header
+            start_r = 1
+        else:
+            header = [str(i + 1) for i in range(n_score)]
+            start_r = 0
+
         data = []
-        for r in range(1, len(rows) - 1):
+        for r in range(start_r, len(rows) - 1):
             inks = [center_ink(bw, cols[c], rows[r], cols[c + 1], rows[r + 1])
                     for c in range(first, ncol)]
             base = float(np.median(inks))
             marked = [i for i, v in enumerate(inks) if v - base > CELL_DELTA]
-            data.append({"row": r,
+            if not marked and len(inks) >= 2:
+                top, second = sorted(inks)[-1], sorted(inks)[-2]
+                faint = top - base > CELL_FAINT or (second - base <= CELL_CLEAN and top - base > CELL_CLEAN_MIN)
+                if faint and top - second >= CELL_LEAD * (top - base):
+                    marked = [inks.index(top)]
+            row_idx = r if start_r == 1 else (r + 1)
+            data.append({"row": row_idx,
                          # đọc từng cột nhãn riêng (cột STT "8." + cột nội dung 2 dòng) rồi ghép lại
                          "label": " ".join(s for s in (text_in(words, cols[c], rows[r], cols[c + 1], rows[r + 1])
                                                        for c in range(first)) if s),
@@ -459,14 +550,15 @@ def scan_page(img, n_score, tpl=None, bw=None, text=None, words=None):
         bw = binarize(img)
     if text is None or words is None:
         text, words = ocr(img, bw)
-    boxes, base = scan_boxes(bw, words, tpl)
+    soft = page_is_soft(img, bw)
+    boxes, base = scan_boxes(bw, words, tpl, low=TM_LOW if soft else TM_FRAME)
     tables = scan_tables(bw, words, n_score)
     # ô vuông nằm trong bảng điểm đã được tính ở phần TABLE -> bỏ khỏi danh sách CHECKBOX để không báo trùng
     def in_table(b):
         cx, cy = b["x"] + b["w"] / 2, b["y"] + b["h"] / 2
         return any(tx <= cx <= tx + tw and ty <= cy <= ty + th for tx, ty, tw, th in (t["bbox"] for t in tables))
     boxes = [b for b in boxes if not in_table(b)]
-    return {"text": text, "words": words, "boxes": boxes, "box_base": base, "tables": tables}
+    return {"text": text, "words": words, "boxes": boxes, "box_base": base, "tables": tables, "soft": soft}
 
 
 def annotate(img, page):
@@ -497,10 +589,16 @@ def main():
     ap.add_argument("--overshoot", type=float, default=0.0, help="xác suất dấu tràn ra ngoài ô (mô phỏng)")
     ap.add_argument("--mixed", action="store_true", help="mô phỏng tài liệu dùng lẫn ô nhỏ viền mảnh (như bản Word thật)")
     ap.add_argument("--rotate", type=float, default=0.0, help="xoay trang vài độ (mô phỏng scan lệch)")
+    ap.add_argument("--styles", default="cross,tick,circle",
+                    help="kiểu dấu mô phỏng, chọn trong cross,tick,circle,fill,dash (mặc định giữ như regress)")
+    ap.add_argument("--light", type=float, default=0.0, help="xác suất dấu mô phỏng vẽ bằng mực nhạt")
+    ap.add_argument("--out", default="output", help="thư mục ghi ảnh *_scan.png và *_scan.json")
+    ap.add_argument("--crops", help="xuất ảnh cắt quanh ô kèm nhãn vào thư mục này (export_crops.py)")
     args = ap.parse_args()
+    styles = args.styles.split(",")
 
-    out = Path("output")
-    out.mkdir(exist_ok=True)
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
     stem = Path(args.pdf).stem
     images = list(render_pages(args.pdf))
     rng = random.Random(args.seed)
@@ -518,6 +616,12 @@ def main():
                     x0, y0 = x + (w - n) // 2, y + (h - n) // 2
                     cv2.rectangle(img, (x0, y0), (x0 + n, y0 + n), (0, 0, 0), 2 if r < 0.25 else 1)
 
+    def ink(rng):   # --light = 0 thì không gọi rng -> chuỗi ngẫu nhiên giữ nguyên như baseline regress
+        if args.light and rng.random() < args.light:
+            v = rng.randint(110, 170)
+            return (v, v, v)
+        return (0, 0, 0)
+
     if args.simulate:
         sim_words_list = [ocr(im, binarize(im))[1] for im in images]
         tpl0 = learn_template(images, words_list=sim_words_list)
@@ -528,12 +632,12 @@ def main():
                     k = 1.7 if rng.random() < args.overshoot else 0.5   # 1.7 -> nét vẽ tràn ra ngoài ô
                     cx, cy = b["x"] + b["w"] / 2, b["y"] + b["h"] / 2
                     box = (int(cx - k * b["w"]), int(cy - k * b["h"]), int(cx + k * b["w"]), int(cy + k * b["h"]))
-                    draw_mark(img, box, rng.choice(["cross", "tick", "circle"]), rng)
-                    truth.append((pno, "box", (b["x"], b["y"])))
+                    draw_mark(img, box, rng.choice(styles), rng, ink(rng))
+                    truth.append((pno, "box", (b["x"], b["y"], b["w"], b["h"])))
             for t in page["tables"]:
                 for r in t["rows"]:
                     c = rng.randrange(len(r["cells"]))
-                    draw_mark(img, r["cells"][c], rng.choice(["cross", "tick", "circle"]), rng)
+                    draw_mark(img, r["cells"][c], rng.choice(styles), rng, ink(rng))
                     truth.append((pno, "cell", (t["index"], r["row"], c)))
 
     if args.simulate and args.rotate:
@@ -609,6 +713,14 @@ def main():
                     "tables": [{**t, "rows": [{k: v for k, v in r.items() if k != "cells"}
                                               for r in t["rows"]]} for t in p["tables"]]}
                    for p in results], f, ensure_ascii=False, indent=2, default=str)
+
+    if args.crops:
+        from export_crops import export
+        if args.simulate:
+            export(images, results, args.crops, f"{stem}_sim{args.seed}", drawn=truth)
+        else:
+            export(images, results, args.crops, stem,
+                   truth_path=TRUTH / f"{stem}.json")
 
 
 if __name__ == "__main__":

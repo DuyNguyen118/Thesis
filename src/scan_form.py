@@ -13,6 +13,7 @@ Chạy:
 import argparse
 import json
 import random
+import re
 from pathlib import Path
 
 import cv2
@@ -283,7 +284,8 @@ def find_boxes_by_template(bw, tpls, words=None, low=TM_FRAME):
         # Bỏ qua nếu là chữ cái nằm sâu bên trong một từ OCR (loại bỏ chữ cái in hoa trong tiêu đề/đoạn văn).
         # Ô có dấu tick tràn thường bị OCR gộp vào từ đầu nhãn ("WVery", "cf") và lệch vào trong từ ~7px,
         # nên chỉ loại khi mép trái ô nằm sau đầu từ >= IN_WORD_SHIFT * chiều rộng ô (chữ cái thật lệch >= 1 ký tự).
-        if words and _inside_word(words, cx, cy, t["w"]):
+        if words and (_inside_word(words, cx, cy, t["w"])
+                      or is_heading_box(words, {"x": bx, "y": by, "w": t["w"], "h": t["h"]})):
             continue
         d = 0.7 * t["w"]
         if all((cx - kx) ** 2 + (cy - ky) ** 2 >= min(d, 0.7 * tpls[kt]["w"]) ** 2
@@ -312,11 +314,32 @@ def find_boxes_by_template(bw, tpls, words=None, low=TM_FRAME):
         o is not b and abs(o["y"] - b["y"]) < 0.5 * b["h"] and 0 < b["x"] - o["x"] < NEIGHBOR_GAP * max(o["w"], b["w"])
         for o in boxes)]
     boxes += _rescue_in_columns(bw, tpls, res_maps, boxes, words)
+    if len(boxes) < 3 and words and tpls:
+        boxes += _find_boxes_from_glyph_column(bw, tpls, boxes, words)
     for b in boxes:   # số ô cùng cột (kể cả chính nó): ô lạc ngoài cột không được dùng luật halo-only
         b["column"] = sum(abs(o["x"] - b["x"]) <= 25 for o in boxes)
 
     boxes.sort(key=lambda b: (b["y"], b["x"]))
     return boxes
+
+
+def is_heading_box(words, b):
+    """Loại các ô rơi vào dòng tiêu đề mục: có số mục '1.', '6.' đứng trước hoặc nằm trong từ tiêu đề IN HOA."""
+    if not words:
+        return False
+    bx, by, bw, bh = b["x"], b["y"], b["w"], b["h"]
+    cy = by + bh / 2
+    for w in words:
+        if abs(w["y"] + w["h"] / 2 - cy) < 0.6 * bh:
+            txt = w["text"].strip()
+            if re.match(r'^(?:[1-9]|1[0-3])\.$', txt) and w["x"] + w["w"] <= bx + 10 and bx - (w["x"] + w["w"]) < 600:
+                return True
+    for w in words:
+        txt = w["text"].strip()
+        if txt.isupper() and len(txt) >= 5:
+            if w["x"] - 5 <= bx and bx + bw <= w["x"] + w["w"] + 5 and abs(w["y"] + w["h"] / 2 - cy) < 0.8 * bh:
+                return True
+    return False
 
 
 def _starts_word(words, x, y, w, h):
@@ -387,7 +410,8 @@ def _rescue_in_columns(bw, tpls, res_maps, boxes, words):
                 if any(abs(o["y"] - y) < 0.8 * o["h"] and abs(o["x"] - x) < o["w"] for o in boxes + found):
                     continue
                 cx, cy = x + t["w"] / 2, y + t["h"] / 2
-                if words and _inside_word(words, cx, cy, t["w"]):
+                if words and (_inside_word(words, cx, cy, t["w"])
+                              or is_heading_box(words, {"x": x, "y": y, "w": t["w"], "h": t["h"]})):
                     continue
                 fill = ink_fill(bw, x, y, t["w"], t["h"])
                 b = {"x": x, "y": y, "w": t["w"], "h": t["h"], "tpl": ti, "fill": fill,
@@ -399,6 +423,48 @@ def _rescue_in_columns(bw, tpls, res_maps, boxes, words):
                 found.append(b)
         found += _rescue_ocr_glyphs(bw, col, boxes + found, words)
     return found
+
+
+def _find_boxes_from_glyph_column(bw, tpls, known, words):
+    """Khi trang không tìm được đủ ô (do ô in viền mảnh/mờ), tìm cột ô từ các ký tự OCR thẳng hàng."""
+    if not words or not tpls:
+        return []
+    H = bw.shape[0]
+    t0 = tpls[0]
+    col_w, col_h = t0["w"], t0["h"]
+    candidates = []
+    for w in words:
+        if w["text"].strip() in CHECKBOX_OCR_GLYPHS and w["w"] <= 55 and w["h"] <= 55:
+            if w["y"] < 0.04 * H or w["y"] > 0.93 * H:
+                continue
+            cy = w["y"] + w["h"] / 2
+            right = w["x"] + w["w"]
+            if any(abs(rw["y"] + rw["h"] / 2 - cy) < 25 and rw["x"] > right + 10 for rw in words):
+                candidates.append(w)
+    if len(candidates) < 3:
+        return []
+    cols = []
+    for c in sorted(candidates, key=lambda w: w["x"]):
+        placed = False
+        for col in cols:
+            if abs(np.median([w["x"] for w in col]) - c["x"]) <= 25:
+                col.append(c)
+                placed = True
+                break
+        if not placed:
+            cols.append([c])
+    out = []
+    for col in cols:
+        if len(col) < 3:
+            continue
+        for w in col:
+            if any(abs(o["y"] - w["y"]) < 0.8 * o["h"] for o in known + out):
+                continue
+            b = {"x": w["x"], "y": w["y"], "w": col_w, "h": col_h, "tpl": 0, "match": 0.50, "rescued": True}
+            if not is_heading_box(words, b) and text_right_of(b, words):
+                b["fill"] = ink_fill(bw, w["x"], w["y"], col_w, col_h)
+                out.append(b)
+    return out
 
 
 # OCR hay đọc ô vuông mờ thành các ký tự này (Data2.1 trang 3: ô khớp mẫu 0.57 bị đọc thành "()";
@@ -429,6 +495,8 @@ def _rescue_ocr_glyphs(bw, col, known, words):
         # đặt ô đúng chỗ ký tự OCR, không ở x trung vị của cột: cột lệch dần do nghiêng còn sót, đặt ở col_x thì ô
         # trượt sang phải ~12 px, trùm chữ cái đầu nhãn và bị tính là có dấu (Data5.1 tr.3 "Can learn")
         b = {"x": w["x"], "y": w["y"], "w": col_w, "h": col_h, "tpl": col_tpl, "match": 0.50, "rescued": True}
+        if is_heading_box(words, b):
+            continue
         if text_right_of(b, words):
             b["fill"] = ink_fill(bw, w["x"], w["y"], col_w, col_h)
             out.append(b)
@@ -460,6 +528,19 @@ def scan_boxes(bw, words, tpls, low=TM_FRAME, gray=None):
         b["text"] = text_right_of(b, words)
     if tpls and gray is not None:
         cnn_rescue(gray, boxes)
+    for b in boxes:
+        # Cờ ô mờ / không chắc chắn: phát hiện các trường hợp cần người dùng kiểm tra lại
+        cnn_p = b.get("cnn_p", -1.0)
+        reasons = []
+        if 0.20 <= cnn_p <= 0.85:
+            reasons.append(f"CNN nghi ngờ ({cnn_p:.2f})")
+        if b.get("rescued") and (b["marked"] or b["fill"] > allf + 0.05):
+            reasons.append("ô cứu theo cột/ký tự")
+        if b.get("match", 1.0) < 0.58 and b["marked"]:
+            reasons.append("viền mờ")
+        if reasons:
+            b["unsure"] = True
+            b["review_reason"] = ", ".join(reasons)
     return boxes, allf
 
 
@@ -566,19 +647,29 @@ def scan_page(img, n_score, tpl=None, bw=None, text=None, words=None):
         cx, cy = b["x"] + b["w"] / 2, b["y"] + b["h"] / 2
         return any(tx <= cx <= tx + tw and ty <= cy <= ty + th for tx, ty, tw, th in (t["bbox"] for t in tables))
     boxes = [b for b in boxes if not in_table(b)]
+    needs_review = quality["soft"] or any(b.get("unsure") for b in boxes)
     return {"text": text, "words": words, "boxes": boxes, "box_base": base, "tables": tables,
-            "quality": quality, "needs_review": quality["soft"]}
+            "quality": quality, "needs_review": needs_review}
 
 
 def annotate(img, page):
     vis = img.copy()
     for b in page["boxes"]:
         col = (0, 0, 255) if b["marked"] else (0, 160, 0)
-        if b["marked"]:
+        if b.get("unsure"):
+            ucol = (0, 140, 255)
+            ov = vis.copy()
+            cv2.rectangle(ov, (b["x"] - 5, b["y"] - 5), (b["x"] + b["w"] + 5, b["y"] + b["h"] + 5), ucol, -1)
+            vis = cv2.addWeighted(ov, 0.35, vis, 0.65, 0)
+            cv2.rectangle(vis, (b["x"] - 5, b["y"] - 5), (b["x"] + b["w"] + 5, b["y"] + b["h"] + 5), ucol, 3)
+            cv2.putText(vis, "?", (b["x"] + 2, b["y"] - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.7, ucol, 2)
+        elif b["marked"]:
             ov = vis.copy()
             cv2.rectangle(ov, (b["x"] - 4, b["y"] - 4), (b["x"] + b["w"] + 4, b["y"] + b["h"] + 4), col, -1)
             vis = cv2.addWeighted(ov, 0.3, vis, 0.7, 0)
-        cv2.rectangle(vis, (b["x"] - 4, b["y"] - 4), (b["x"] + b["w"] + 4, b["y"] + b["h"] + 4), col, 3)
+            cv2.rectangle(vis, (b["x"] - 4, b["y"] - 4), (b["x"] + b["w"] + 4, b["y"] + b["h"] + 4), col, 3)
+        else:
+            cv2.rectangle(vis, (b["x"] - 4, b["y"] - 4), (b["x"] + b["w"] + 4, b["y"] + b["h"] + 4), col, 3)
     for t in page["tables"]:
         for r in t["rows"]:
             for i in r["marked_cols"]:
@@ -693,7 +784,9 @@ def main():
         print(page["text"].strip() or "(không có chữ)")
         print(f"\n[CHECKBOX] {len(page['boxes'])} ô, {sum(b['marked'] for b in page['boxes'])} ô có dấu")
         for b in page["boxes"]:
-            print(f"  {'[X]' if b['marked'] else '[ ]'} (x={b['x']}, y={b['y']}) {b['text']}")
+            mark_str = "[?]" if b.get("unsure") else ("[X]" if b["marked"] else "[ ]")
+            rev_str = f" [CẦN XEM LẠI: {b.get('review_reason')}]" if b.get("unsure") else ""
+            print(f"  {mark_str} (x={b['x']}, y={b['y']}) {b['text']}{rev_str}")
         for t in page["tables"]:
             print(f"\n[TABLE {t['index']}] cột điểm: {t['header']}")
             for r in t["rows"]:
